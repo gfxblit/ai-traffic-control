@@ -1,0 +1,6 @@
+[
+  { "port": 7681, "name": "7681", "description": "tmux session 7681" },
+  { "port": 7683, "name": "7683", "description": "tmux session 7683" },
+  { "port": 7684, "name": "7684", "description": "tmux session 7684" },
+  { "port": 7685, "name": "7685", "description": "tmux session 7685" }
+]
