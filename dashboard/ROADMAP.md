@@ -71,7 +71,7 @@ Status:
 - Hook writer + runtime file model implemented under `dashboard/runtime/slots/<slot>/current`.
 - zsh hook bootstrap generation is live by default (`ENABLE_SHELL_HOOKS` defaults to on).
 - Fixed interactive-shell freeze caused by unguarded stdin reads in the hook writer (TTY stdin now skips JSON read path).
-- Regression guard exists as automated ttyd E2E (`tests/e2e/terminal-smoke.spec.mjs`) validating both command execution and hook emission.
+- Regression guard exists as automated ttyd E2E (`tests/e2e/terminal-smoke.spec.mjs`) validating command execution, all shell hooks (`shell_start`, `preexec`, `precmd`, `chpwd`), and derived session telemetry in `/api/sessions`.
 
 ## Milestone 4 (Done): Shared Hook Writer + Env Contract
 Scope:

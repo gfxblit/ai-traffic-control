@@ -5,7 +5,7 @@ Runs a lightweight dashboard on port `1111` to show:
 - Configured scientist slots from `sessions.json` with lifecycle state (`idle` / `active`)
 - Tap-card actions (`idle -> spawn`, `active -> connect`) plus `×` kill control
 - Per-slot metadata (`taskTitle`, `workdir`, `agentType`) from `state/sessions-state.json`
-- Shell telemetry (`active since`, `last interaction`, live `cwd`) from `runtime/slots/<slot>/current/*`
+- Shell telemetry (`active since`, `last interaction`, live `cwd`, `last command`, `last event`, command duration) from `runtime/slots/<slot>/current/*`
 
 ## Start
 
@@ -39,7 +39,7 @@ Each spawned slot writes shell hook events into:
 - `dashboard/runtime/slots/<slot>/current/meta.json`
 - `dashboard/runtime/slots/<slot>/current/derived.json`
 
-Hooks are shell-level (`preexec`, `precmd`, `chpwd`) and run even without Codex/Claude active.
+Hooks are shell-level (`shell_start`, `preexec`, `precmd`, `chpwd`) and run even without Codex/Claude active.
 
 Spawned sessions inject this env contract:
 - `ATC_SLOT`
@@ -98,7 +98,7 @@ npm run test
 
 This runs:
 - Unit: `tests/unit/shell-hook-writer.test.mjs`
-- E2E: `tests/e2e/terminal-smoke.spec.mjs` (spawns a slot, types via ttyd, asserts file write)
+- E2E: `tests/e2e/terminal-smoke.spec.mjs` (spawns a slot, types via ttyd, validates file-write execution, validates `shell_start`/`preexec`/`precmd`/`chpwd`, validates dashboard derived telemetry)
 
 Or run from repo root:
 

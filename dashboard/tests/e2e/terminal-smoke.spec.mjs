@@ -26,6 +26,22 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function readEvents(filePath) {
+  const raw = await fs.readFile(filePath, 'utf8');
+  return raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 async function waitFor(fn, timeoutMs = 12000, stepMs = 200) {
   const start = Date.now();
   let lastErr = null;
@@ -88,6 +104,7 @@ test.beforeAll(async () => {
       SESSIONS_RUNTIME_DIR: runtimeDir,
       DEFAULT_SESSION_WORKDIR: workdir,
       ENABLE_SHELL_HOOKS: '1',
+      TELEMETRY_INGEST_MS: '500',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -121,8 +138,10 @@ test.afterAll(async () => {
   }
 });
 
-test('spawned ttyd terminal executes keystrokes and writes expected file', async ({ page }) => {
+test('shell hooks emit full telemetry and dashboard exposes derived metadata', async ({ page }) => {
   const markerFile = path.join(workdir, `terminal-smoke-${Date.now()}.txt`);
+  const subdir = path.join(workdir, 'hook-cwd');
+  const pwdFile = path.join(workdir, `hook-pwd-${Date.now()}.txt`);
 
   await api('/api/sessions/spawn', 'POST', { name: 'Feynman' });
 
@@ -138,8 +157,8 @@ test('spawned ttyd terminal executes keystrokes and writes expected file', async
   await expect
     .poll(async () => {
       try {
-        const raw = await fs.readFile(eventsFile, 'utf8');
-        return raw.includes('"eventType":"shell_start"');
+        const rows = await readEvents(eventsFile);
+        return rows.some((row) => row.eventType === 'shell_start');
       } catch {
         return false;
       }
@@ -151,8 +170,13 @@ test('spawned ttyd terminal executes keystrokes and writes expected file', async
 
   // Focus terminal and execute a command purely through keystrokes.
   await page.locator('.xterm').click({ position: { x: 120, y: 120 } });
-  const cmd = `printf 'atc-terminal-e2e-ok\\n' > ${markerFile}`;
-  await page.keyboard.type(cmd, { delay: 15 });
+  await page.keyboard.type(`mkdir -p ${subdir}`, { delay: 12 });
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`cd ${subdir}`, { delay: 12 });
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`pwd > ${pwdFile}`, { delay: 12 });
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`printf 'atc-terminal-e2e-ok\\n' > ${markerFile}`, { delay: 12 });
   await page.keyboard.press('Enter');
 
   await expect
@@ -172,28 +196,71 @@ test('spawned ttyd terminal executes keystrokes and writes expected file', async
   await expect
     .poll(async () => {
       try {
-        const raw = await fs.readFile(eventsFile, 'utf8');
-        const rows = raw
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => {
-            try {
-              return JSON.parse(line);
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
-        return rows.some((row) => row.eventType === 'preexec' && typeof row.command === 'string' && row.command.includes(markerFile));
+        const rows = await readEvents(eventsFile);
+        const hasPreexec = rows.some((row) => row.eventType === 'preexec' && typeof row.command === 'string' && row.command.includes(markerFile));
+        const hasPrecmd = rows.some((row) => row.eventType === 'precmd');
+        const hasChpwd = rows.some(
+          (row) => row.eventType === 'chpwd' && typeof row.cwd === 'string' && (row.cwd === subdir || row.cwd.endsWith('/hook-cwd'))
+        );
+        return hasPreexec && hasPrecmd && hasChpwd;
       } catch {
         return false;
       }
     }, {
       timeout: 10000,
-      message: 'expected shell hooks to record preexec event',
+      message: 'expected shell hooks to record preexec/precmd/chpwd events',
     })
     .toBe(true);
+
+  await expect
+    .poll(async () => {
+      try {
+        const text = await fs.readFile(pwdFile, 'utf8');
+        return text.trim();
+      } catch {
+        return '';
+      }
+    }, {
+      timeout: 10000,
+      message: `expected pwd output to be written to ${pwdFile}`,
+    })
+    .toBe(subdir);
+
+  await expect
+    .poll(async () => {
+      const payload = await api('/api/sessions');
+      const slot = payload.sessions.find((s) => s.name === 'Feynman');
+      if (!slot?.telemetry) return null;
+      return {
+        cwd: slot.workdir,
+        activeSince: slot.activeSince,
+        lastInteractionAgo: slot.lastInteractionAgo,
+        lastEventType: slot.telemetry.lastEventType,
+        lastCommand: slot.telemetry.lastCommand,
+        durationMs: slot.telemetry.durationMs,
+      };
+    }, {
+      timeout: 12000,
+      message: 'expected dashboard session API to expose derived shell telemetry',
+    })
+    .toMatchObject({
+      cwd: subdir,
+      activeSince: expect.any(String),
+      lastEventType: 'precmd',
+      lastCommand: expect.stringContaining(markerFile),
+      lastInteractionAgo: expect.stringMatching(/ago$/),
+    });
+
+  await expect
+    .poll(async () => {
+      const payload = await api('/api/sessions');
+      const slot = payload.sessions.find((s) => s.name === 'Feynman');
+      return Number(slot?.telemetry?.durationMs);
+    }, {
+      timeout: 12000,
+      message: 'expected numeric command duration in derived telemetry',
+    })
+    .toBeGreaterThanOrEqual(0);
 
   await api('/api/sessions/kill', 'POST', { name: 'Feynman' });
 });

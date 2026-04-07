@@ -1041,6 +1041,13 @@ function renderPage() {
       '</article>';
     }
 
+    function compact(v, max) {
+      const cleaned = String(v || '').replace(/\\s+/g, ' ').trim();
+      if (!cleaned) return '';
+      if (cleaned.length <= max) return cleaned;
+      return cleaned.slice(0, max - 1) + '…';
+    }
+
     function hostForPort(port) {
       return window.location.protocol + '//' + window.location.hostname + ':' + port;
     }
@@ -1100,6 +1107,8 @@ function renderPage() {
           '<div class="line muted">Agent: ' + esc(s.agentType || 'none') + ' | Turns: ' + esc((s.telemetry && s.telemetry.turnCount) ? s.telemetry.turnCount : 0) + '</div>' +
           '<div class="line muted">Context window: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.contextWindowPct))) ? (Math.round(Number(s.telemetry.contextWindowPct)) + '%') : 'N/A') + '</div>' +
           '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + esc(s.lastInteractionAgo || 'n/a') + '</div>' +
+          '<div class="line muted">Shell: ' + esc(compact((s.telemetry && s.telemetry.lastCommand) ? s.telemetry.lastCommand : 'no command yet', 60)) + '</div>' +
+          '<div class="line muted">Last event: ' + esc((s.telemetry && s.telemetry.lastEventType) ? s.telemetry.lastEventType : 'n/a') + ' | Last cmd duration: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.durationMs))) ? (Math.round(Number(s.telemetry.durationMs)) + 'ms') : 'n/a') + '</div>' +
           (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
           '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
         '</div>' +
