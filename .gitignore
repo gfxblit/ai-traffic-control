@@ -1,0 +1,3 @@
+nginx-ttyd/logs/*.log
+nginx-ttyd/logs/*.pid
+nginx-ttyd/logs/nginx.pid
