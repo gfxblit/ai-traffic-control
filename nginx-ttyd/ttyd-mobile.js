@@ -126,6 +126,47 @@
       });
   }
 
+  function setKeyboardOffset(px) {
+    var n = Math.max(0, Math.round(px || 0));
+    document.documentElement.style.setProperty("--ttyd-kb-offset", n + "px");
+  }
+
+  function keyboardOffsetFromVisualViewport() {
+    var vv = window.visualViewport;
+    if (!vv) return 0;
+    var raw = window.innerHeight - (vv.height + vv.offsetTop);
+    if (!Number.isFinite(raw)) return 0;
+    if (raw < 0) return 0;
+    // Ignore tiny browser chrome jitters; only treat larger inset as keyboard.
+    if (raw < 24) return 0;
+    return raw;
+  }
+
+  function installKeyboardAvoidance() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var raf = 0;
+
+    function schedule() {
+      if (raf) return;
+      raf = window.requestAnimationFrame(function () {
+        raf = 0;
+        setKeyboardOffset(keyboardOffsetFromVisualViewport());
+      });
+    }
+
+    vv.addEventListener("resize", schedule);
+    vv.addEventListener("scroll", schedule);
+    document.addEventListener("focusin", schedule);
+    document.addEventListener("focusout", function () {
+      setTimeout(schedule, 160);
+    });
+    window.addEventListener("orientationchange", function () {
+      setTimeout(schedule, 120);
+    });
+    schedule();
+  }
+
   function bindTouchScroll() {
     if (touchBound) return;
     var viewport = document.querySelector(".xterm .xterm-viewport");
@@ -339,6 +380,7 @@
     updateFontLabel(initialFont);
     applyFontSize(initialFont);
     setWrapEnabled(localStorage.getItem(WRAP_KEY) !== "0");
+    installKeyboardAvoidance();
     bindTouchScroll();
     if (flags.scrollbar) ensureScrollRail();
     if (flags.history) setTimeout(preloadTmuxHistory, 120);
