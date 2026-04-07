@@ -1,8 +1,8 @@
 (function () {
   var MIN_FONT = 10;
   var MAX_FONT = 36;
-  var DEFAULT_FONT = 22;
-  var STORAGE_KEY = "ttyd_mobile_font_size_v2";
+  var DEFAULT_FONT = 24;
+  var STORAGE_KEY = "ttyd_mobile_font_size_v3";
   var WRAP_KEY = "ttyd_mobile_wrap";
   var touchBound = false;
   var railInit = false;
@@ -67,6 +67,18 @@
     term.options.fontSize = size;
     dispatchResizeTwice();
     if (typeof term.focus === "function") term.focus();
+  }
+
+  function ensureFontApplied(retriesLeft) {
+    var term = getTerm();
+    if (term) {
+      applyFontSize(readFontSize());
+      return;
+    }
+    if (retriesLeft <= 0) return;
+    setTimeout(function () {
+      ensureFontApplied(retriesLeft - 1);
+    }, 120);
   }
 
   function setWrapEnabled(enabled) {
@@ -359,8 +371,7 @@
   var decBtn = document.getElementById("ttyd-btn-font-dec");
   if (decBtn) {
     decBtn.addEventListener("click", function () {
-      var term = getTerm();
-      var current = term ? term.options.fontSize || readFontSize() : readFontSize();
+      var current = readFontSize();
       applyFontSize(current - 1);
     });
   }
@@ -368,8 +379,7 @@
   var incBtn = document.getElementById("ttyd-btn-font-inc");
   if (incBtn) {
     incBtn.addEventListener("click", function () {
-      var term = getTerm();
-      var current = term ? term.options.fontSize || readFontSize() : readFontSize();
+      var current = readFontSize();
       applyFontSize(current + 1);
     });
   }
@@ -379,6 +389,7 @@
     var initialFont = readFontSize();
     updateFontLabel(initialFont);
     applyFontSize(initialFont);
+    ensureFontApplied(20);
     setWrapEnabled(localStorage.getItem(WRAP_KEY) !== "0");
     installKeyboardAvoidance();
     bindTouchScroll();
