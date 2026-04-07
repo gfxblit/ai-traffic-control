@@ -40,7 +40,7 @@ Scope:
 Status:
 - Implemented (baseline fields and state persistence).
 
-## Milestone 3 (Next): Shell-Level Hooks (Required Before Agent Hooks)
+## Milestone 3 (Done): Shell-Level Hooks (Required Before Agent Hooks)
 Scope:
 - Add shell-native hooks in each spawned zsh session:
   - `preexec`
@@ -67,7 +67,12 @@ Acceptance criteria:
 - `cwd` changes and command activity update timestamps reliably.
 - Dashboard shows `active for`, `last interaction`, and live workdir without any agent running.
 
-## Milestone 4: Shared Hook Writer + Env Contract
+Status:
+- Implemented with per-slot runtime files under `dashboard/runtime/slots/<slot>/current`.
+- Hooked zsh `preexec`, `precmd`, `chpwd`, plus `shell_start` event emission through `dashboard/scripts/shell-hook-writer.mjs`.
+- Dashboard session payload now merges `derived.json` telemetry for live timing/workdir display.
+
+## Milestone 4 (Next): Shared Hook Writer + Env Contract
 Scope:
 - Standardize per-slot runtime env vars injected at spawn:
   - `ATC_SLOT`

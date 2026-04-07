@@ -6,3 +6,4 @@ nginx-ttyd-notmux/
 vibetunnel/
 dashboard/run/
 dashboard/state/
+dashboard/runtime/

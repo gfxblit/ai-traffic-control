@@ -73,6 +73,7 @@ for (const s of sessions) {
     workdir:"/Users/nihal/Code/MobileDev",
     agentType:"none",
     spawnedAt:null,
+    runId:null,
     firstInteractionAt:null,
     lastInteractionAt:null,
     pid:null,

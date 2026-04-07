@@ -5,6 +5,7 @@ Runs a lightweight dashboard on port `1111` to show:
 - Configured scientist slots from `sessions.json` with lifecycle state (`idle` / `active`)
 - Tap-card actions (`idle -> spawn`, `active -> connect`) plus `×` kill control
 - Per-slot metadata (`taskTitle`, `workdir`, `agentType`) from `state/sessions-state.json`
+- Shell telemetry (`active since`, `last interaction`, live `cwd`) from `runtime/slots/<slot>/current/*`
 
 ## Start
 
@@ -29,6 +30,16 @@ Edit `dashboard/sessions.json`:
 ```
 
 `publicPort` is what you open on phone. `backendPort` is the local ttyd backend port proxied by nginx.
+
+## Runtime telemetry
+
+Each spawned slot writes shell hook events into:
+
+- `dashboard/runtime/slots/<slot>/current/events.jsonl`
+- `dashboard/runtime/slots/<slot>/current/meta.json`
+- `dashboard/runtime/slots/<slot>/current/derived.json`
+
+Hooks are shell-level (`preexec`, `precmd`, `chpwd`) and run even without Codex/Claude active.
 
 ## Fast Mobile UI Feedback
 
