@@ -678,7 +678,7 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv) {
       cwd: sessionState.workdir || DEFAULT_WORKDIR,
       detached: true,
       stdio: ['ignore', out, out],
-      env: { ...process.env, ...runtimeEnv, DASH_SLOT_NAME: slot.name, ZDOTDIR: runtimeEnv.ATC_ZDOTDIR },
+      env: { ...process.env, ...runtimeEnv, DASH_SLOT_NAME: slot.name },
     }
   );
 
@@ -789,10 +789,7 @@ async function spawnSlotByName(name) {
   const runId = makeRunId();
   await rotateSlotCurrent(slot.name, st.runId);
   const { hookEnv } = await ensureSlotRuntime(slot.name, runId, st.workdir);
-  const pid = await spawnSessionBackend(slot, st, {
-    ...hookEnv,
-    ATC_ZDOTDIR: slotRuntimePaths(slot.name).zdotdir,
-  });
+  const pid = await spawnSessionBackend(slot, st, { ...hookEnv });
   st.status = 'active';
   st.pid = pid;
   st.error = null;
