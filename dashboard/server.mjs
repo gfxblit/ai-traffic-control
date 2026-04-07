@@ -465,7 +465,7 @@ function renderPage() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Scientist Sessions Dashboard</title>
+  <title>AI Traffic Control</title>
   <style>
     :root {
       --bg0: #0b1020;
@@ -595,7 +595,7 @@ function renderPage() {
 </head>
 <body>
   <div class="shell">
-    <h1>Scientist Session Control</h1>
+    <h1>AI Traffic Control</h1>
     <div class="sub">Tap card: idle -> spawn, active -> connect. Use <strong>×</strong> to kill.</div>
 
     <section class="panel">
