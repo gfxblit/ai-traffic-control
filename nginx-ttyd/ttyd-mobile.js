@@ -113,6 +113,13 @@
     }
   }
 
+  function focusTerminal() {
+    var term = getTerm();
+    if (term && typeof term.focus === "function") {
+      term.focus();
+    }
+  }
+
   function preloadTmuxHistory() {
     if (historyLoaded) return;
     var term = getTerm();
@@ -567,6 +574,7 @@
   }
 
   bind("ttyd-btn-ctrlc", "\x03");
+  bind("ttyd-btn-enter", "\r");
   bind("ttyd-btn-esc", "\x1b");
   bind("ttyd-btn-tab", "\x09");
   bind("ttyd-btn-up", "\x1b[A");
@@ -612,6 +620,19 @@
     if (tb.contains(e.target)) return;
     closeDrawer();
   });
+
+  document.addEventListener(
+    "touchstart",
+    function (e) {
+      var node = e.target;
+      if (!node || !node.closest) return;
+      if (node.closest("#ttyd-mobile-toolbar")) return;
+      if (node.closest(".xterm, #terminal-container, .xterm-screen, .xterm-viewport")) {
+        focusTerminal();
+      }
+    },
+    { passive: true, capture: true }
+  );
 
   window.addEventListener("load", function () {
     var flags = mobileFlags();

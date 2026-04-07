@@ -124,6 +124,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
 <div id="ttyd-mobile-toolbar" aria-label="Terminal mobile controls">
   <div id="ttyd-toolbar-main">
     <button type="button" id="ttyd-btn-ctrlc">Ctrl+C</button>
+    <button type="button" id="ttyd-btn-enter">Enter</button>
     <button type="button" id="ttyd-btn-tab" data-input-only="1">Tab</button>
     <button type="button" id="ttyd-btn-up" data-input-only="1">&#8593;</button>
     <button type="button" id="ttyd-btn-down" data-input-only="1">&#8595;</button>
