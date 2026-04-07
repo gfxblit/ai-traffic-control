@@ -30,16 +30,19 @@
 }
 
 #ttyd-mobile-toolbar button {
-  min-height: 58px !important;
-  height: 58px !important;
+  min-height: 96px !important;
+  height: 96px !important;
   border: 0 !important;
   border-radius: 14px !important;
   background: #2f2f2f;
   color: #fff;
-  font-size: 18px !important;
+  font-size: 22px !important;
   line-height: 1 !important;
   font-weight: 700;
-  padding: 0 12px !important;
+  padding: 0 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   touch-action: manipulation;
 }
 
