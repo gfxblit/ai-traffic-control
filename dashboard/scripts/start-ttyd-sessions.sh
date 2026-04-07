@@ -3,20 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SESSIONS_FILE="${SESSIONS_FILE:-$ROOT_DIR/sessions.json}"
+STATE_FILE="${SESSIONS_STATE_FILE:-$ROOT_DIR/state/sessions-state.json}"
 RUN_DIR="$ROOT_DIR/run"
 NGINX_PREFIX="$RUN_DIR/nginx"
 NGINX_CONF="$RUN_DIR/nginx-sessions.conf"
 NGINX_BIN="${NGINX_BIN:-/opt/homebrew/opt/nginx/bin/nginx}"
-TTYD_BIN="${TTYD_BIN:-/opt/homebrew/bin/ttyd}"
-SHELL_BIN="${SHELL_BIN:-/bin/zsh}"
 ASSETS_DIR="${ASSETS_DIR:-/Users/nihal/Code/MobileDev/nginx-ttyd}"
 
-mkdir -p "$RUN_DIR" "$NGINX_PREFIX/logs"
-
-if ! command -v "$TTYD_BIN" >/dev/null 2>&1; then
-  echo "ttyd not found at $TTYD_BIN" >&2
-  exit 1
-fi
+mkdir -p "$RUN_DIR" "$NGINX_PREFIX/logs" "$(dirname "$STATE_FILE")"
 
 if ! command -v "$NGINX_BIN" >/dev/null 2>&1; then
   echo "nginx not found at $NGINX_BIN" >&2
@@ -28,55 +22,31 @@ if [ ! -f "$SESSIONS_FILE" ]; then
   exit 1
 fi
 
-# Stop old tmux-backed ttyd sessions from previous layout.
-for old_port in 7681 7682 7683 7684 7685; do
-  old_pid="$(lsof -tiTCP:"$old_port" -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$old_pid" ]; then
-    kill "$old_pid" 2>/dev/null || true
-  fi
-done
-
-while IFS=$'\t' read -r name public_port backend_port description; do
+while IFS=$'\t' read -r _name _public_port backend_port _description; do
   pid_file="$RUN_DIR/ttyd-${backend_port}.pid"
   if [ -f "$pid_file" ]; then
     old_pid="$(cat "$pid_file" 2>/dev/null || true)"
     if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
       kill "$old_pid" 2>/dev/null || true
+      sleep 0.2
+      if kill -0 "$old_pid" 2>/dev/null; then
+        kill -9 "$old_pid" 2>/dev/null || true
+      fi
     fi
+    rm -f "$pid_file"
   fi
 
-  if lsof -nP -iTCP:"$backend_port" -sTCP:LISTEN >/dev/null 2>&1; then
-    if lsof -nP -iTCP:"$backend_port" -sTCP:LISTEN | grep -q ttyd; then
-      echo "ttyd backend already listening on :$backend_port ($name)"
-    else
-      echo "backend port :$backend_port is occupied by another process, skipping $name" >&2
+  port_pid="$(lsof -tiTCP:"$backend_port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$port_pid" ]; then
+    kill "$port_pid" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "$port_pid" 2>/dev/null; then
+      kill -9 "$port_pid" 2>/dev/null || true
     fi
-    continue
   fi
-
-  launched_pid="$(node -e '
-const fs = require("fs");
-const { spawn } = require("child_process");
-const logFile = process.argv[1];
-const ttydBin = process.argv[2];
-const shellBin = process.argv[3];
-const port = process.argv[4];
-const out = fs.openSync(logFile, "a");
-const child = spawn(
-  ttydBin,
-  ["-W", "-i", "127.0.0.1", "-p", String(port), "-t", "scrollback=100000", "-t", "disableResizeOverlay=true", "--", shellBin, "-il"],
-  { detached: true, stdio: ["ignore", out, out] }
-);
-child.unref();
-process.stdout.write(String(child.pid));
-' "$RUN_DIR/ttyd-${backend_port}.log" "$TTYD_BIN" "$SHELL_BIN" "$backend_port")"
-
-  echo "$launched_pid" >"$pid_file"
-  echo "started ttyd backend :$backend_port for $name"
 done < <(node -e '
 const fs=require("fs");
-const file=process.argv[1];
-const rows=JSON.parse(fs.readFileSync(file,"utf8"));
+const rows=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 for (const row of rows) {
   const name=String(row.name ?? "").trim();
   const pub=Number(row.publicPort);
@@ -86,6 +56,33 @@ for (const row of rows) {
   console.log(`${name}\t${pub}\t${back}\t${desc}`);
 }
 ' "$SESSIONS_FILE")
+
+node -e '
+const fs=require("fs");
+const path=require("path");
+const sessions=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const stateFile=process.argv[2];
+const out={version:1,updatedAt:new Date().toISOString(),sessions:{}};
+for (const s of sessions) {
+  const name=String(s.name ?? "").trim();
+  if (!name) continue;
+  out.sessions[name]={
+    name,
+    status:"idle",
+    taskTitle:`${name} task`,
+    workdir:"/Users/nihal/Code/MobileDev",
+    agentType:"none",
+    spawnedAt:null,
+    firstInteractionAt:null,
+    lastInteractionAt:null,
+    pid:null,
+    lastExitAt:new Date().toISOString(),
+    error:null
+  };
+}
+fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+fs.writeFileSync(stateFile, JSON.stringify(out, null, 2) + "\n", "utf8");
+' "$SESSIONS_FILE" "$STATE_FILE"
 
 cat >"$NGINX_CONF" <<EOF
 worker_processes 1;
@@ -106,7 +103,7 @@ http {
   keepalive_timeout 65;
 EOF
 
-while IFS=$'\t' read -r name public_port backend_port description; do
+while IFS=$'\t' read -r _name public_port backend_port _description; do
   cat >>"$NGINX_CONF" <<EOF
   server {
     listen $public_port;
@@ -174,8 +171,7 @@ while IFS=$'\t' read -r name public_port backend_port description; do
 EOF
 done < <(node -e '
 const fs=require("fs");
-const file=process.argv[1];
-const rows=JSON.parse(fs.readFileSync(file,"utf8"));
+const rows=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 for (const row of rows) {
   const name=String(row.name ?? "").trim();
   const pub=Number(row.publicPort);
@@ -193,8 +189,8 @@ EOF
 "$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF" -t
 if [ -f "$NGINX_PREFIX/logs/nginx.pid" ] && kill -0 "$(cat "$NGINX_PREFIX/logs/nginx.pid")" 2>/dev/null; then
   "$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF" -s reload
-  echo "reloaded nginx session proxy (700x -> 800x)"
+  echo "reloaded nginx session proxy (700x -> 800x). all scientist slots idle."
 else
   "$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF"
-  echo "started nginx session proxy (700x -> 800x)"
+  echo "started nginx session proxy (700x -> 800x). all scientist slots idle."
 fi

@@ -4,3 +4,5 @@ nginx-ttyd/logs/nginx.pid
 nginx-ttyd-test/
 nginx-ttyd-notmux/
 vibetunnel/
+dashboard/run/
+dashboard/state/

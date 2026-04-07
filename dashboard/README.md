@@ -2,13 +2,14 @@
 
 Runs a lightweight dashboard on port `1111` to show:
 - Codex usage (% used in 5-hour and weekly windows + reset times)
-- Configured ttyd sessions from `sessions.json` with live active/offline status
-- One-click links to open each ttyd session in a new tab
+- Configured scientist slots from `sessions.json` with lifecycle state (`idle` / `active`)
+- Tap-card actions (`idle -> spawn`, `active -> connect`) plus `×` kill control
+- Per-slot metadata (`taskTitle`, `workdir`, `agentType`) from `state/sessions-state.json`
 
 ## Start
 
 ```bash
-# Start mapped ttyd ports (public 700x proxied by nginx to ttyd backends on 800x)
+# Reset all slot backends to idle and start/reload nginx proxy (public 700x -> backend 800x)
 ./dashboard/scripts/start-ttyd-sessions.sh
 
 # Start dashboard in tmux on :1111
@@ -28,3 +29,17 @@ Edit `dashboard/sessions.json`:
 ```
 
 `publicPort` is what you open on phone. `backendPort` is the local ttyd backend port proxied by nginx.
+
+## Fast Mobile UI Feedback
+
+Capture a mobile screenshot of the dashboard (Playwright, `Pixel 7` by default):
+
+```bash
+./dashboard/scripts/mobile-screenshot.sh http://127.0.0.1:1111 dashboard/run/dashboard-mobile.png
+```
+
+Override device:
+
+```bash
+DEVICE="iPhone 13" ./dashboard/scripts/mobile-screenshot.sh
+```
