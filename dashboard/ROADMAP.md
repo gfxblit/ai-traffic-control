@@ -123,7 +123,7 @@ Status:
 - Added `dashboard/scripts/enable-codex-hooks.sh` and enabled `codex_hooks = true` in `~/.codex/config.toml`.
 - Validated ingestion with simulated Codex payloads and `Stop` JSON response handling.
 
-## Milestone 6 (Next): Claude Native Hooks Integration
+## Milestone 6 (Done): Claude Native Hooks Integration
 Scope:
 - Configure Claude hooks to call the same shared hook writer.
 - Normalize Claude hook payload into the same event schema as Codex.
@@ -132,7 +132,12 @@ Acceptance criteria:
 - Claude events appear in slot `events.jsonl` with `provider=claude`.
 - Dashboard shows Claude-specific activity only when Claude events exist.
 
-## Milestone 7: Derived Metrics + Title Generation
+Status:
+- Added repo-local `.claude/settings.json` hook config for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`.
+- Reused shared forwarder/writer pipeline so Claude and Codex land in the same event stream format.
+- Validated with simulated Claude-style payloads forwarded into slot runtime files.
+
+## Milestone 7 (Next): Derived Metrics + Title Generation
 Scope:
 - Background ingestor computes and updates `derived.json` from events.
 - 5-minute title poll:

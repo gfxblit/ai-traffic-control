@@ -65,6 +65,8 @@ Enable the feature flag once on this machine:
 
 When `codex` runs inside a spawned slot shell, native Codex hook payloads are forwarded into that slot's `events.jsonl` via the same shared writer.
 
+Claude uses repo-local `.claude/settings.json` and the same forwarder, so Codex and Claude events land in the same per-slot schema.
+
 ## Fast Mobile UI Feedback
 
 Capture a mobile screenshot of the dashboard (Playwright, `Pixel 7` by default):

@@ -40,6 +40,7 @@ const nowIso = new Date().toISOString();
 const stdinEvent = readStdinJson();
 const slot = process.env.ATC_SLOT || 'unknown';
 const runId = process.env.ATC_RUN_ID || 'unknown';
+const provider = process.env.ATC_PROVIDER || stdinEvent?.provider || null;
 const currentDir = process.env.ATC_CURRENT_DIR || '';
 const fallbackEvents = currentDir ? path.join(currentDir, 'events.jsonl') : path.join(process.cwd(), 'dashboard', 'runtime', 'unassigned-events.jsonl');
 const eventsFile = process.env.ATC_EVENTS_FILE || fallbackEvents;
@@ -63,6 +64,7 @@ const event = {
   ts: nowIso,
   slot,
   runId,
+  provider,
   eventType,
   cwd,
   command,
@@ -80,6 +82,7 @@ const nextMeta = {
   ...meta,
   slot,
   runId,
+  provider,
   activeSince: meta.activeSince || nowIso,
   lastInteractionAt: nowIso,
   cwd: event.cwd || meta.cwd || null,
@@ -99,6 +102,7 @@ writeJsonAtomic(metaFile, nextMeta);
 const nextDerived = {
   slot,
   runId,
+  provider,
   activeSince: nextMeta.activeSince,
   lastInteractionAt: nextMeta.lastInteractionAt,
   cwd: nextMeta.cwd,
