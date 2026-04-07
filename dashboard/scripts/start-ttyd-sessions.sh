@@ -3,16 +3,23 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SESSIONS_FILE="${SESSIONS_FILE:-$ROOT_DIR/sessions.json}"
-TMUX_BIN="${TMUX_BIN:-tmux}"
+RUN_DIR="$ROOT_DIR/run"
+NGINX_PREFIX="$RUN_DIR/nginx"
+NGINX_CONF="$RUN_DIR/nginx-sessions.conf"
+NGINX_BIN="${NGINX_BIN:-/opt/homebrew/opt/nginx/bin/nginx}"
 TTYD_BIN="${TTYD_BIN:-/opt/homebrew/bin/ttyd}"
+SHELL_BIN="${SHELL_BIN:-/bin/zsh}"
+ASSETS_DIR="${ASSETS_DIR:-/Users/nihal/Code/MobileDev/nginx-ttyd}"
 
-if ! command -v "$TMUX_BIN" >/dev/null 2>&1; then
-  echo "tmux not found" >&2
-  exit 1
-fi
+mkdir -p "$RUN_DIR" "$NGINX_PREFIX/logs"
 
 if ! command -v "$TTYD_BIN" >/dev/null 2>&1; then
   echo "ttyd not found at $TTYD_BIN" >&2
+  exit 1
+fi
+
+if ! command -v "$NGINX_BIN" >/dev/null 2>&1; then
+  echo "nginx not found at $NGINX_BIN" >&2
   exit 1
 fi
 
@@ -21,41 +28,173 @@ if [ ! -f "$SESSIONS_FILE" ]; then
   exit 1
 fi
 
-while IFS= read -r line; do
-  port="${line%%$'\t'*}"
-  name="${line#*$'\t'}"
-  backend_session="ttyd-backend-${port}"
+# Stop old tmux-backed ttyd sessions from previous layout.
+for old_port in 7681 7682 7683 7684 7685; do
+  old_pid="$(lsof -tiTCP:"$old_port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$old_pid" ]; then
+    kill "$old_pid" 2>/dev/null || true
+  fi
+done
 
-  if ! "$TMUX_BIN" has-session -t "$name" 2>/dev/null; then
-    "$TMUX_BIN" new-session -d -s "$name"
-    echo "created tmux session '$name'"
+while IFS=$'\t' read -r name public_port backend_port description; do
+  pid_file="$RUN_DIR/ttyd-${backend_port}.pid"
+  if [ -f "$pid_file" ]; then
+    old_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+      kill "$old_pid" 2>/dev/null || true
+    fi
   fi
 
-  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    if lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q ttyd; then
-      echo "ttyd already listening on :$port"
+  if lsof -nP -iTCP:"$backend_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"$backend_port" -sTCP:LISTEN | grep -q ttyd; then
+      echo "ttyd backend already listening on :$backend_port ($name)"
     else
-      echo "port :$port already in use by another process, skipping"
+      echo "backend port :$backend_port is occupied by another process, skipping $name" >&2
     fi
     continue
   fi
 
-  if "$TMUX_BIN" has-session -t "$backend_session" 2>/dev/null; then
-    "$TMUX_BIN" kill-session -t "$backend_session"
-  fi
+  launched_pid="$(node -e '
+const fs = require("fs");
+const { spawn } = require("child_process");
+const logFile = process.argv[1];
+const ttydBin = process.argv[2];
+const shellBin = process.argv[3];
+const port = process.argv[4];
+const out = fs.openSync(logFile, "a");
+const child = spawn(
+  ttydBin,
+  ["-W", "-i", "127.0.0.1", "-p", String(port), "-t", "scrollback=100000", "-t", "disableResizeOverlay=true", "--", shellBin, "-il"],
+  { detached: true, stdio: ["ignore", out, out] }
+);
+child.unref();
+process.stdout.write(String(child.pid));
+' "$RUN_DIR/ttyd-${backend_port}.log" "$TTYD_BIN" "$SHELL_BIN" "$backend_port")"
 
-  "$TMUX_BIN" new-session -d -s "$backend_session" zsh -lc \
-    "\"$TTYD_BIN\" -W -i 0.0.0.0 -p \"$port\" -t scrollback=100000 -t disableResizeOverlay=true -- \"$TMUX_BIN\" attach -t \"$name\""
-
-  echo "started ttyd :$port -> tmux session '$name' (backend $backend_session)"
+  echo "$launched_pid" >"$pid_file"
+  echo "started ttyd backend :$backend_port for $name"
 done < <(node -e '
 const fs=require("fs");
 const file=process.argv[1];
-const arr=JSON.parse(fs.readFileSync(file,"utf8"));
-for (const s of arr) {
-  const p=Number(s.port);
-  if (!Number.isFinite(p) || p<=0) continue;
-  const name=String(s.name ?? p);
-  console.log(`${p}\t${name}`);
+const rows=JSON.parse(fs.readFileSync(file,"utf8"));
+for (const row of rows) {
+  const name=String(row.name ?? "").trim();
+  const pub=Number(row.publicPort);
+  const back=Number(row.backendPort);
+  if (!name || !Number.isFinite(pub) || !Number.isFinite(back)) continue;
+  const desc=String(row.description ?? "").replace(/\t/g, " ");
+  console.log(`${name}\t${pub}\t${back}\t${desc}`);
 }
 ' "$SESSIONS_FILE")
+
+cat >"$NGINX_CONF" <<EOF
+worker_processes 1;
+
+pid logs/nginx.pid;
+error_log logs/error.log info;
+
+events {
+  worker_connections 1024;
+}
+
+http {
+  include /opt/homebrew/etc/nginx/mime.types;
+  default_type application/octet-stream;
+
+  access_log logs/access.log;
+  sendfile on;
+  keepalive_timeout 65;
+EOF
+
+while IFS=$'\t' read -r name public_port backend_port description; do
+  cat >>"$NGINX_CONF" <<EOF
+  server {
+    listen $public_port;
+    server_name _;
+
+    location / {
+      proxy_pass http://127.0.0.1:$backend_port;
+      proxy_http_version 1.1;
+      proxy_set_header Host \$host;
+      proxy_set_header Upgrade \$http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Accept-Encoding "";
+
+      sub_filter_once on;
+      sub_filter "</body>" '
+<link rel="stylesheet" href="/ttyd-mobile.css?v=14" />
+<div id="ttyd-mobile-toolbar" aria-label="Terminal mobile controls">
+  <div id="ttyd-toolbar-main">
+    <button type="button" id="ttyd-btn-ctrlc">Ctrl+C</button>
+    <button type="button" id="ttyd-btn-tab" data-input-only="1">Tab</button>
+    <button type="button" id="ttyd-btn-up" data-input-only="1">&#8593;</button>
+    <button type="button" id="ttyd-btn-down" data-input-only="1">&#8595;</button>
+    <button type="button" id="ttyd-btn-esc" data-input-only="1">Esc</button>
+    <button type="button" id="ttyd-btn-more" aria-expanded="false">More</button>
+  </div>
+  <div id="ttyd-toolbar-drawer" hidden>
+    <div id="ttyd-drawer-pages">
+      <div class="ttyd-drawer-page">
+        <button type="button" id="ttyd-btn-wrap">Wrap On</button>
+        <button type="button" id="ttyd-btn-font-dec">A-</button>
+        <button type="button" id="ttyd-btn-font-inc">A+</button>
+      </div>
+      <div class="ttyd-drawer-page">
+        <button type="button" id="ttyd-btn-esc-alt">Esc</button>
+        <button type="button" id="ttyd-btn-tab-alt">Tab</button>
+        <button type="button" id="ttyd-btn-up-alt">&#8593;</button>
+        <button type="button" id="ttyd-btn-down-alt">&#8595;</button>
+      </div>
+    </div>
+    <div id="ttyd-font-size-label">Font: --px</div>
+  </div>
+</div>
+<script>
+  window.TTYD_MOBILE_FLAGS = {
+    scrollbar: false,
+    history: false,
+    touchscroll: false
+  };
+</script>
+<script src="/ttyd-mobile.js?v=12"></script>
+</body>';
+    }
+
+    location = /ttyd-mobile.css {
+      default_type text/css;
+      alias $ASSETS_DIR/ttyd-mobile.css;
+    }
+
+    location = /ttyd-mobile.js {
+      default_type application/javascript;
+      alias $ASSETS_DIR/ttyd-mobile.js;
+    }
+  }
+
+EOF
+done < <(node -e '
+const fs=require("fs");
+const file=process.argv[1];
+const rows=JSON.parse(fs.readFileSync(file,"utf8"));
+for (const row of rows) {
+  const name=String(row.name ?? "").trim();
+  const pub=Number(row.publicPort);
+  const back=Number(row.backendPort);
+  if (!name || !Number.isFinite(pub) || !Number.isFinite(back)) continue;
+  const desc=String(row.description ?? "").replace(/\t/g, " ");
+  console.log(`${name}\t${pub}\t${back}\t${desc}`);
+}
+' "$SESSIONS_FILE")
+
+cat >>"$NGINX_CONF" <<'EOF'
+}
+EOF
+
+"$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF" -t
+if [ -f "$NGINX_PREFIX/logs/nginx.pid" ] && kill -0 "$(cat "$NGINX_PREFIX/logs/nginx.pid")" 2>/dev/null; then
+  "$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF" -s reload
+  echo "reloaded nginx session proxy (700x -> 800x)"
+else
+  "$NGINX_BIN" -p "$NGINX_PREFIX/" -c "$NGINX_CONF"
+  echo "started nginx session proxy (700x -> 800x)"
+fi

@@ -1,6 +1,6 @@
 [
-  { "port": 7681, "name": "7681", "description": "tmux session 7681" },
-  { "port": 7683, "name": "7683", "description": "tmux session 7683" },
-  { "port": 7684, "name": "7684", "description": "tmux session 7684" },
-  { "port": 7685, "name": "7685", "description": "tmux session 7685" }
+  { "name": "Feynman", "publicPort": 7001, "backendPort": 8001, "description": "Feynman session" },
+  { "name": "Einstein", "publicPort": 7002, "backendPort": 8002, "description": "Einstein session" },
+  { "name": "Gauss", "publicPort": 7003, "backendPort": 8003, "description": "Gauss session" },
+  { "name": "Fermi", "publicPort": 7004, "backendPort": 8004, "description": "Fermi session" }
 ]

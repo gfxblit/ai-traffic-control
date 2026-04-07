@@ -8,7 +8,7 @@ Runs a lightweight dashboard on port `1111` to show:
 ## Start
 
 ```bash
-# Start mapped ttyd ports (one ttyd per mapped tmux session)
+# Start mapped ttyd ports (public 700x proxied by nginx to ttyd backends on 800x)
 ./dashboard/scripts/start-ttyd-sessions.sh
 
 # Start dashboard in tmux on :1111
@@ -23,8 +23,8 @@ Edit `dashboard/sessions.json`:
 
 ```json
 [
-  { "port": 7681, "name": "7681", "description": "tmux session 7681" }
+  { "name": "Feynman", "publicPort": 7001, "backendPort": 8001, "description": "Feynman session" }
 ]
 ```
 
-`name` is the tmux session name and should match the port by convention.
+`publicPort` is what you open on phone. `backendPort` is the local ttyd backend port proxied by nginx.

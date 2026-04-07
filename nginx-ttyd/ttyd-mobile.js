@@ -39,9 +39,11 @@
     var cfg = window.TTYD_MOBILE_FLAGS || {};
     var scrollbar = parseBool(queryParam("scrollbar"), parseBool(cfg.scrollbar, false));
     var history = parseBool(queryParam("history"), parseBool(cfg.history, false));
+    var touchscroll = parseBool(queryParam("touchscroll"), parseBool(cfg.touchscroll, true));
     return {
       scrollbar: scrollbar,
       history: history,
+      touchscroll: touchscroll,
     };
   }
 
@@ -619,15 +621,16 @@
     ensureFontApplied(20);
     setWrapEnabled(localStorage.getItem(WRAP_KEY) !== "0");
     installKeyboardAvoidance();
-    bindTouchScroll();
+    if (flags.touchscroll) bindTouchScroll();
     if (flags.scrollbar) ensureScrollRail();
     if (flags.history) setTimeout(preloadTmuxHistory, 120);
     updateLayoutInsets();
   });
 
   window.addEventListener("resize", function () {
-    bindTouchScroll();
-    if (mobileFlags().scrollbar) ensureScrollRail();
+    var flags = mobileFlags();
+    if (flags.touchscroll) bindTouchScroll();
+    if (flags.scrollbar) ensureScrollRail();
     updateLayoutInsets();
   });
 })();

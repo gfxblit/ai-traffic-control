@@ -133,11 +133,19 @@ async function readSessionsConfig() {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .map((s) => ({
-        name: String(s.name ?? s.port ?? ''),
-        port: Number(s.port),
+        name: String(s.name ?? ''),
+        publicPort: Number(s.publicPort),
+        backendPort: Number(s.backendPort),
         description: s.description ? String(s.description) : '',
       }))
-      .filter((s) => Number.isFinite(s.port) && s.port > 0);
+      .filter(
+        (s) =>
+          s.name &&
+          Number.isFinite(s.publicPort) &&
+          Number.isFinite(s.backendPort) &&
+          s.publicPort > 0 &&
+          s.backendPort > 0
+      );
   } catch {
     return [];
   }
@@ -168,7 +176,8 @@ async function getSessionsStatus() {
   const withStatus = await Promise.all(
     sessions.map(async (s) => ({
       ...s,
-      active: await checkPortOpen(s.port),
+      active: await checkPortOpen(s.publicPort),
+      backendActive: await checkPortOpen(s.backendPort),
     }))
   );
   return withStatus;
@@ -275,7 +284,7 @@ function renderPage() {
   </section>
 
   <section class="card">
-    <div class="title">TTYD Sessions (port = tmux session name)</div>
+    <div class="title">TTYD Sessions (public 700x -> backend 800x)</div>
     <div id="sessions"></div>
   </section>
 
@@ -336,10 +345,10 @@ function renderPage() {
 
       const sessionsEl = document.getElementById('sessions');
       sessionsEl.innerHTML = (sessions.sessions || []).map(function(s) {
-        var url = hostForPort(s.port);
+        var url = hostForPort(s.publicPort);
         return '<div class="row">' +
           '<div>' +
-            '<div class="name">Session ' + esc(s.name) + ' <span class="muted">(port ' + esc(s.port) + ')</span></div>' +
+            '<div class="name">' + esc(s.name) + ' <span class="muted">(public ' + esc(s.publicPort) + ' -> backend ' + esc(s.backendPort) + ')</span></div>' +
             '<div class="muted">' + esc(s.description || '') + '</div>' +
           '</div>' +
           '<div style="display:flex;align-items:center;gap:10px;">' +
