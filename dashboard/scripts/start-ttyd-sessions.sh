@@ -155,7 +155,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
     touchscroll: false
   };
 </script>
-<script src="/ttyd-mobile.js?v=12"></script>
+<script src="/ttyd-mobile.js?v=13"></script>
 </body>';
     }
 
