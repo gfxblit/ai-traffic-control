@@ -240,24 +240,21 @@ function sessionPictureSrc(session) {
   return `/assets/${picturePath}`;
 }
 
-async function readPersonaPrompt(personaId) {
+function personaPromptPath(personaId) {
   const persona = personaConfig(personaId);
   if (!persona || persona.id === PERSONA_NONE || !persona.promptFile) return null;
-  const promptPath = path.join(PERSONAS_DIR, persona.promptFile);
-  const raw = await fs.readFile(promptPath, 'utf8');
-  return String(raw || '').trimEnd();
+  return path.join(PERSONAS_DIR, persona.promptFile);
 }
 
-function shellPromptSubstitution(promptText) {
-  const encoded = Buffer.from(String(promptText || ''), 'utf8').toString('base64');
-  return `$(node -e "process.stdout.write(Buffer.from(process.argv[1],'base64').toString('utf8'))" ${shSingle(encoded)})`;
+function shellPromptSubstitutionFromFile(promptFilePath) {
+  return `$(cat ${shSingle(promptFilePath)})`;
 }
 
-function buildProviderLaunchCommand(provider, workdir, promptText) {
+function buildProviderLaunchCommand(provider, workdir, promptFilePath = null) {
   const baseCommand = providerBootCommand(provider);
   const workdirPrefix = workdir ? `cd ${shSingle(workdir)} && ` : '';
-  if (!promptText) return `${workdirPrefix}${baseCommand}`;
-  return `${workdirPrefix}${baseCommand} "${shellPromptSubstitution(promptText)}"`;
+  if (!promptFilePath) return `${workdirPrefix}${baseCommand}`;
+  return `${workdirPrefix}${baseCommand} "${shellPromptSubstitutionFromFile(promptFilePath)}"`;
 }
 
 function normalizeTemplateId(templateId, fallbackTemplate = TEMPLATE_NEW_BRAINSTORM) {
@@ -827,8 +824,8 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
 
 async function launchProviderInTmuxSlot(sessionName, provider, sessionState) {
   if (!ENABLE_PROVIDER_AUTO_LAUNCH) return;
-  const personaPrompt = await readPersonaPrompt(sessionState?.personaId);
-  const command = buildProviderLaunchCommand(provider, sessionState?.workdir || DEFAULT_WORKDIR, personaPrompt);
+  const promptFilePath = personaPromptPath(sessionState?.personaId);
+  const command = buildProviderLaunchCommand(provider, sessionState?.workdir || DEFAULT_WORKDIR, promptFilePath);
   if (!command) return;
 
   const target = `${sessionName}:${TMUX_SLOT_WINDOW}.0`;

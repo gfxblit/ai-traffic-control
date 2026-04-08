@@ -20,10 +20,11 @@ test('persona aliases normalize to the new slot machine bandit id', () => {
   assert.equal(normalizePersonaForTemplate('tester', 'continue_work'), 'tester');
 });
 
-test('provider launch command can seed the prompt file content without custom agents', () => {
-  const command = buildProviderLaunchCommand('codex', '/tmp/workspace', '# Persona\n- Do the thing');
+test('provider launch command seeds prompt from a persona file path', () => {
+  const command = buildProviderLaunchCommand('codex', '/tmp/workspace', '/tmp/personas/refactor.md');
 
   assert.match(command, /cd '\/tmp\/workspace' && codex --dangerously-bypass-approvals-and-sandbox/);
-  assert.match(command, /process\.argv\[1\]/);
-  assert.match(command, /base64/);
+  assert.match(command, /\$\(cat '\/tmp\/personas\/refactor\.md'\)/);
+  assert.doesNotMatch(command, /node -e/);
+  assert.doesNotMatch(command, /base64/);
 });
