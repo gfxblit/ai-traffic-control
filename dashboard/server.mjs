@@ -116,49 +116,92 @@ function compactText(text, max = 64) {
   return cleaned.length <= max ? cleaned : `${cleaned.slice(0, max - 1)}…`;
 }
 
-async function getCodexUsage() {
+function parseWindow(windowValue, fallbackMinutes = null) {
+  if (!windowValue || typeof windowValue !== 'object') return null;
+  const usedPercent = Number(windowValue.usedPercent ?? 0);
+  const windowMinutes = Number(windowValue.windowMinutes ?? fallbackMinutes ?? 0);
+  return {
+    usedPercent: Number.isFinite(usedPercent) ? usedPercent : 0,
+    windowMinutes: Number.isFinite(windowMinutes) && windowMinutes > 0 ? windowMinutes : fallbackMinutes,
+    resetsAt: windowValue.resetsAt || null,
+    resetDescription: windowValue.resetDescription || null,
+  };
+}
+
+async function fetchCodexbarUsage(provider, source = 'auto') {
+  const args = ['usage', '--provider', provider, '--format', 'json'];
+  if (source) args.push('--source', source);
+  const raw = await runCommand('codexbar', args);
+  if (!raw.ok) return { ok: false, error: raw.stderr || 'codexbar usage failed', provider };
+
+  try {
+    const parsed = JSON.parse(raw.stdout);
+    const root = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!root || typeof root !== 'object') return { ok: false, error: 'codexbar returned empty payload', provider };
+    if (root.error) return { ok: false, error: root.error.message || 'provider error', provider };
+
+    const usage = root.usage || null;
+    const dashboard = root.openaiDashboard || null;
+    const primary = usage?.primary || dashboard?.primaryLimit || null;
+    const secondary = usage?.secondary || dashboard?.secondaryLimit || null;
+
+    return {
+      ok: true,
+      provider: (provider || '').toLowerCase(),
+      source: root.source || source || 'auto',
+      accountEmail: usage?.accountEmail || dashboard?.signedInEmail || null,
+      plan: usage?.loginMethod || dashboard?.accountPlan || null,
+      primary: parseWindow(primary),
+      secondary: parseWindow(secondary),
+      updatedAt: usage?.updatedAt || null,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return { ok: false, error: `failed to parse codexbar json: ${error.message}`, provider };
+  }
+}
+
+function decorateUsageWindows(payload, labels) {
+  if (!payload?.ok) return payload;
+  const out = { ...payload };
+  const [primaryLabel, secondaryLabel] = labels;
+  out.primary = payload.primary
+    ? {
+        ...payload.primary,
+        label: primaryLabel,
+        resetIn: formatCountdown(payload.primary.resetsAt),
+        resetAtLocal: formatLocalTime(payload.primary.resetsAt),
+      }
+    : null;
+  out.secondary = payload.secondary
+    ? {
+        ...payload.secondary,
+        label: secondaryLabel,
+        resetIn: formatCountdown(payload.secondary.resetsAt),
+        resetAtLocal: formatLocalTime(payload.secondary.resetsAt),
+      }
+    : null;
+  return out;
+}
+
+async function getUsageSummary() {
   const now = Date.now();
   if (usageCache.value && now - usageCache.fetchedAt < USAGE_TTL_MS) return usageCache.value;
   if (usageCache.pending) return usageCache.pending;
 
   usageCache.pending = (async () => {
-    const raw = await runCommand('codexbar', ['usage', '--provider', 'codex', '--source', 'cli', '--format', 'json']);
-    if (!raw.ok) return { provider: 'Codex', ok: false, error: raw.stderr || 'codexbar usage failed' };
+    const [codexRaw, claudeRaw, geminiRaw] = await Promise.all([
+      fetchCodexbarUsage('codex', 'cli'),
+      fetchCodexbarUsage('claude', 'web'),
+      fetchCodexbarUsage('gemini', 'auto'),
+    ]);
 
-    try {
-      const parsed = JSON.parse(raw.stdout);
-      const root = Array.isArray(parsed) ? parsed[0] : parsed;
-      const usage = root?.usage || null;
-      const openaiDashboard = root?.openaiDashboard || null;
-      const primary = usage?.primary || openaiDashboard?.primaryLimit || null;
-      const secondary = usage?.secondary || openaiDashboard?.secondaryLimit || null;
-      const accountEmail = usage?.accountEmail || openaiDashboard?.signedInEmail || 'unknown';
-      const plan = usage?.loginMethod || openaiDashboard?.accountPlan || root?.source || 'unknown';
-
-      return {
-        provider: 'Codex',
-        ok: true,
-        accountEmail,
-        plan,
-        fiveHour: primary
-          ? {
-              usedPercent: Number(primary.usedPercent ?? 0),
-              windowMinutes: Number(primary.windowMinutes ?? 300),
-              resetsAt: primary.resetsAt || null,
-            }
-          : null,
-        weekly: secondary
-          ? {
-              usedPercent: Number(secondary.usedPercent ?? 0),
-              windowMinutes: Number(secondary.windowMinutes ?? 10080),
-              resetsAt: secondary.resetsAt || null,
-            }
-          : null,
-        fetchedAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      return { provider: 'Codex', ok: false, error: `failed to parse codexbar json: ${error.message}` };
-    }
+    return {
+      fetchedAt: new Date().toISOString(),
+      codex: decorateUsageWindows(codexRaw, ['5-hour', 'weekly']),
+      claude: decorateUsageWindows(claudeRaw, ['5-hour', 'weekly']),
+      gemini: decorateUsageWindows(geminiRaw, ['24h primary', '24h secondary']),
+    };
   })();
 
   const value = await usageCache.pending;
@@ -964,15 +1007,33 @@ function renderPage() {
       font-family: "Avenir Next", "Avenir", "Trebuchet MS", "Segoe UI", sans-serif;
       color: var(--text);
       background:
-        radial-gradient(1200px 600px at 0% -20%, #22346a55 0%, transparent 55%),
-        radial-gradient(1000px 600px at 100% 0%, #4a2d7f44 0%, transparent 50%),
+        radial-gradient(1200px 600px at 0% -20%, #1f5f9d4d 0%, transparent 55%),
+        radial-gradient(1000px 600px at 100% 0%, #0b7a7044 0%, transparent 50%),
         linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
       min-height: 100vh;
       padding: 16px;
     }
-    .shell { max-width: 900px; margin: 0 auto; }
-    h1 { margin: 0; font-size: 26px; letter-spacing: 0.2px; }
-    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .shell { max-width: 980px; margin: 0 auto; }
+    .title-wrap {
+      text-align: center;
+      margin-top: 4px;
+      margin-bottom: 10px;
+      padding: 10px 14px;
+      border: 1px solid #2c3c62;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #172543cc, #10192fcc);
+      box-shadow: 0 10px 26px #0000002a;
+    }
+    .title {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: 0.3px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .title .decor { font-size: 24px; }
+    .title .accent { color: #79c3ff; }
     .panel {
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -982,16 +1043,112 @@ function renderPage() {
       margin-top: 14px;
       box-shadow: 0 8px 28px #0000002e;
     }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-    .stat {
-      border: 1px solid #2e3f67;
-      border-radius: 12px;
-      padding: 12px;
-      background: linear-gradient(160deg, #1a2544 0%, #111932 100%);
+    .usage-stack { display: grid; gap: 10px; }
+    .usage-row {
+      border: 1px solid #2b3d64;
+      border-radius: 14px;
+      background: linear-gradient(150deg, #18274a 0%, #101a33 100%);
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: minmax(170px, 210px) 1fr;
+      gap: 12px;
+      align-items: center;
     }
-    .stat .k { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-    .stat .v { font-size: 24px; font-weight: 700; }
-    .stat .m { color: #c8d5f7; font-size: 12px; margin-top: 4px; }
+    .provider {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .provider-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid #314369;
+      background: #0f172d;
+      object-fit: contain;
+      padding: 6px;
+    }
+    .provider-name {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .provider-meta {
+      margin-top: 2px;
+      color: #b5c8ee;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .windows {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .window {
+      border: 1px solid #30456f;
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: linear-gradient(160deg, #162647 0%, #101b36 100%);
+    }
+    .window-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 5px;
+    }
+    .window-label {
+      color: #b6c6e7;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .window-value {
+      font-size: 19px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .window-reset {
+      color: #c9d8f8;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .bar {
+      margin-top: 6px;
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: #0e1730;
+      border: 1px solid #2e4169;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      transition: width 180ms ease-out;
+      background: linear-gradient(90deg, #1bb172 0%, #f0b526 72%, #d7424d 100%);
+    }
+    .window.missing {
+      display: grid;
+      place-content: center;
+      text-align: center;
+      color: #9eb2db;
+      font-size: 12px;
+      min-height: 76px;
+    }
+    .usage-row.error {
+      border-color: #7c2d43;
+      background: linear-gradient(150deg, #3c1928 0%, #2a1420 100%);
+    }
+    .usage-error {
+      color: #ffcfda;
+      font-size: 12px;
+      line-height: 1.2;
+    }
 
     .sessions { display: grid; gap: 10px; }
     .session {
@@ -1014,6 +1171,15 @@ function renderPage() {
     .session:active { transform: scale(0.99); }
     .session.tap:hover { border-color: #4bc6ff; box-shadow: 0 0 0 1px #4bc6ff22 inset; cursor: pointer; }
     .session.tap:hover::before { transform: translateX(100%); }
+    .session.spawning { border-color: #5a70b3; box-shadow: 0 0 0 1px #5a70b333 inset; }
+    .session.spawning::before {
+      animation: atc-shimmer 900ms linear infinite;
+      transform: translateX(-100%);
+    }
+    @keyframes atc-shimmer {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(100%); }
+    }
     .session-inner { padding: 14px 52px 14px 14px; }
     .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
     .name { font-size: 17px; font-weight: 700; }
@@ -1061,20 +1227,6 @@ function renderPage() {
       border-top: 1px dashed #324365;
       padding-top: 8px;
     }
-    .warmup {
-      margin-top: 8px;
-      border: 1px solid #2c3f67;
-      border-radius: 999px;
-      background: #101a34;
-      height: 8px;
-      overflow: hidden;
-    }
-    .warmup-fill {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #6ba7ff 0%, #8c7bff 70%, #55d7b5 100%);
-      transition: width 120ms linear;
-    }
     .color-idle { color: var(--amber); }
     .color-active { color: var(--green); }
     .color-starting { color: #cdd8ff; }
@@ -1082,7 +1234,11 @@ function renderPage() {
 
     @media (max-width: 640px) {
       body { padding: 12px; }
-      h1 { font-size: 22px; }
+      .title { font-size: 22px; }
+      .title .decor { font-size: 18px; }
+      .usage-row { grid-template-columns: 1fr; }
+      .provider { grid-template-columns: 30px 1fr; }
+      .provider-logo { width: 30px; height: 30px; padding: 5px; }
       .session-inner { padding-right: 46px; }
       .name { font-size: 16px; }
     }
@@ -1090,11 +1246,12 @@ function renderPage() {
 </head>
 <body>
   <div class="shell">
-    <h1>AI Traffic Control</h1>
-    <div class="sub">Tap card: idle -> spawn, active -> connect. Use <strong>×</strong> to kill.</div>
+    <section class="title-wrap">
+      <h1 class="title"><span class="decor">🗼</span><span class="accent">AI Traffic Control</span><span class="decor">💻</span></h1>
+    </section>
 
     <section class="panel">
-      <div class="stats" id="usage-grid"></div>
+      <div class="usage-stack" id="usage-grid"></div>
     </section>
 
     <section class="panel" style="margin-top:12px;">
@@ -1105,9 +1262,6 @@ function renderPage() {
   <script>
     const refreshing = new Set();
     const spawning = new Set();
-    const connectWarmupUntil = new Map();
-    const CONNECT_WARMUP_MS = 2500;
-    const POST_SPAWN_COOLDOWN_MS = 1800;
 
     function esc(v) {
       return String(v)
@@ -1118,11 +1272,62 @@ function renderPage() {
         .replaceAll("'", '&#39;');
     }
 
-    function usageCard(title, value, meta, tone) {
-      return '<article class="stat" style="border-color:' + tone + ';">' +
-        '<div class="k">' + esc(title) + '</div>' +
-        '<div class="v">' + esc(value) + '</div>' +
-        '<div class="m">' + esc(meta || '') + '</div>' +
+    const PROVIDER_LOGOS = {
+      codex: '/assets/logos/openai.svg',
+      claude: '/assets/logos/anthropic.svg',
+      gemini: '/assets/logos/google.svg',
+    };
+
+    function clampPct(value) {
+      const pct = Number(value ?? 0);
+      if (!Number.isFinite(pct)) return 0;
+      return Math.max(0, Math.min(100, pct));
+    }
+
+    function pctColor(pct) {
+      if (pct >= 85) return '#f96a73';
+      if (pct >= 70) return '#f0bf44';
+      return '#38cc89';
+    }
+
+    function windowCard(windowInfo) {
+      if (!windowInfo) return '<article class="window missing">No data</article>';
+      const pct = clampPct(windowInfo.usedPercent);
+      return '<article class="window">' +
+        '<div class="window-head">' +
+          '<div class="window-label">' + esc(windowInfo.label || 'window') + '</div>' +
+          '<div class="window-value" style="color:' + pctColor(pct) + ';">' + esc(Math.round(pct) + '%') + '</div>' +
+        '</div>' +
+        '<div class="window-reset">Reset in ' + esc(windowInfo.resetIn || 'n/a') + '</div>' +
+        '<div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '</article>';
+    }
+
+    function providerUsageRow(providerKey, title, payload) {
+      const logo = PROVIDER_LOGOS[providerKey] || '';
+      if (!payload || !payload.ok) {
+        return '<article class="usage-row error">' +
+          '<div class="provider">' +
+            '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" />' +
+            '<div><div class="provider-name">' + esc(title) + '</div></div>' +
+          '</div>' +
+          '<div class="usage-error">' + esc(payload?.error || 'Usage unavailable') + '</div>' +
+        '</article>';
+      }
+
+      const meta = [payload.plan, payload.accountEmail].filter(Boolean).join(' • ');
+      return '<article class="usage-row">' +
+        '<div class="provider">' +
+          '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" />' +
+          '<div>' +
+            '<div class="provider-name">' + esc(title) + '</div>' +
+            '<div class="provider-meta">' + esc(meta || 'connected') + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="windows">' +
+          windowCard(payload.primary) +
+          windowCard(payload.secondary) +
+        '</div>' +
       '</article>';
     }
 
@@ -1178,17 +1383,12 @@ function renderPage() {
       if (refreshing.has(name)) return;
       refreshing.add(name);
       spawning.add(name);
-      connectWarmupUntil.set(name, Date.now() + CONNECT_WARMUP_MS);
       refresh().catch(() => {});
-      let spawnOk = false;
       try {
         await apiPost('/api/sessions/spawn', { name: name });
-        spawnOk = true;
-        connectWarmupUntil.set(name, Math.max(Number(connectWarmupUntil.get(name) || 0), Date.now() + POST_SPAWN_COOLDOWN_MS));
       } catch (err) {
         alert('Spawn failed for ' + name + ': ' + err.message);
       } finally {
-        if (!spawnOk) connectWarmupUntil.delete(name);
         spawning.delete(name);
         refreshing.delete(name);
         await refresh();
@@ -1204,7 +1404,6 @@ function renderPage() {
       refreshing.add(name);
       try {
         await apiPost('/api/sessions/kill', { name: name });
-        connectWarmupUntil.delete(name);
       } catch (err) {
         alert('Kill failed for ' + name + ': ' + err.message);
       } finally {
@@ -1215,16 +1414,13 @@ function renderPage() {
 
     function sessionCard(s) {
       const isActive = s.status === 'active' && s.backendActive;
-      const warmUntil = Number(connectWarmupUntil.get(s.name) || 0);
       const isSpawning = spawning.has(s.name);
-      const isWarming = isSpawning || (isActive && warmUntil > Date.now());
-      const warmPct = isWarming ? Math.max(0, Math.min(100, Math.round(((CONNECT_WARMUP_MS - (warmUntil - Date.now())) / CONNECT_WARMUP_MS) * 100))) : 100;
-      const actionText = isWarming ? 'Starting terminal…' : (isActive ? 'Tap to connect' : 'Tap to spawn');
-      const actionClass = isWarming ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
-      const badgeClass = isWarming ? 'starting' : (isActive ? 'active' : 'idle');
-      const badgeText = isWarming ? 'starting' : (isActive ? 'active' : 'idle');
+      const actionText = isSpawning ? 'Starting terminal…' : (isActive ? 'Tap to connect' : 'Tap to spawn');
+      const actionClass = isSpawning ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
+      const badgeClass = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
+      const badgeText = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
 
-      return '<article class="session tap" data-name="' + esc(s.name) + '" data-active="' + (isActive ? '1' : '0') + '" data-warming="' + (isWarming ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
+      return '<article class="session tap ' + (isSpawning ? 'spawning' : '') + '" data-name="' + esc(s.name) + '" data-active="' + (isActive ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
         '<button class="kill" ' + (isActive ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
         '<div class="session-inner">' +
           '<div class="head">' +
@@ -1239,7 +1435,6 @@ function renderPage() {
           '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + esc(s.lastInteractionAgo || 'n/a') + '</div>' +
           '<div class="line muted">Shell: ' + esc(compact((s.telemetry && s.telemetry.lastCommand) ? s.telemetry.lastCommand : 'no command yet', 60)) + '</div>' +
           '<div class="line muted">Last event: ' + esc((s.telemetry && s.telemetry.lastEventType) ? s.telemetry.lastEventType : 'n/a') + ' | Last cmd duration: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.durationMs))) ? (Math.round(Number(s.telemetry.durationMs)) + 'ms') : 'n/a') + '</div>' +
-          (isWarming ? '<div class="warmup"><div class="warmup-fill" style="width:' + warmPct + '%"></div></div>' : '') +
           (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
           '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
         '</div>' +
@@ -1259,9 +1454,7 @@ function renderPage() {
 
           const active = item.status === 'active' && item.backendActive;
           const isSpawning = spawning.has(item.name);
-          const warmUntil = Number(connectWarmupUntil.get(item.name) || 0);
-          const isWarming = active && warmUntil > Date.now();
-          if (isSpawning || isWarming) return;
+          if (isSpawning) return;
           if (active) {
             await prewarmPublicEndpoint(item.publicPort);
             window.open(connectUrlForPort(item.publicPort), '_blank', 'noopener,noreferrer');
@@ -1292,29 +1485,14 @@ function renderPage() {
       const usage = await usageResp.json();
       const sessionsPayload = await sessionsResp.json();
       const sessions = sessionsPayload.sessions || [];
-      const nowTs = Date.now();
-      for (const [key, until] of connectWarmupUntil.entries()) {
-        if (!Number.isFinite(until) || until <= nowTs) connectWarmupUntil.delete(key);
-      }
 
       const usageGrid = document.getElementById('usage-grid');
-      const cards = [];
-      const codex = usage.codex;
-      if (codex && codex.ok) {
-        if (codex.fiveHour) {
-          const color = codex.fiveHour.usedPercent >= 85 ? '#b4233b' : (codex.fiveHour.usedPercent >= 70 ? '#a86a05' : '#0f8f66');
-          cards.push(usageCard('Codex 5h', Math.round(codex.fiveHour.usedPercent) + '%', 'Reset in ' + (codex.fiveHour.resetIn || 'n/a'), color));
-        }
-        if (codex.weekly) {
-          const color2 = codex.weekly.usedPercent >= 85 ? '#b4233b' : (codex.weekly.usedPercent >= 70 ? '#a86a05' : '#0f8f66');
-          cards.push(usageCard('Codex weekly', Math.round(codex.weekly.usedPercent) + '%', 'Reset in ' + (codex.weekly.resetIn || 'n/a'), color2));
-        }
-      } else {
-        cards.push(usageCard('Codex', 'Unavailable', codex?.error || 'No data', '#7d1d2c'));
-      }
-      cards.push(usageCard('Claude', 'soon', 'Integration queued', '#3a4c78'));
-      cards.push(usageCard('Gemini', 'soon', 'Integration queued', '#3a4c78'));
-      usageGrid.innerHTML = cards.join('');
+      const rows = [
+        providerUsageRow('codex', 'Codex', usage.codex),
+        providerUsageRow('claude', 'Claude', usage.claude),
+        providerUsageRow('gemini', 'Gemini', usage.gemini),
+      ];
+      usageGrid.innerHTML = rows.join('');
 
       const sessionsEl = document.getElementById('sessions');
       sessionsEl.innerHTML = sessions.map(sessionCard).join('') || '<div class="line muted">No sessions configured.</div>';
@@ -1336,25 +1514,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname.startsWith('/assets/')) {
+    const rel = url.pathname.replace(/^\/assets\//, '');
+    const fullPath = path.normalize(path.join(__dirname, 'assets', rel));
+    const assetsRoot = path.normalize(path.join(__dirname, 'assets') + path.sep);
+    if (!fullPath.startsWith(assetsRoot)) {
+      json(res, 400, { error: 'invalid asset path' });
+      return;
+    }
+    try {
+      const data = await fs.readFile(fullPath);
+      const ext = path.extname(fullPath).toLowerCase();
+      const mime = ext === '.svg' ? 'image/svg+xml' : ext === '.png' ? 'image/png' : 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': mime,
+        'Cache-Control': 'public, max-age=86400',
+        'Content-Length': data.length,
+      });
+      res.end(data);
+    } catch {
+      json(res, 404, { error: 'asset not found' });
+    }
+    return;
+  }
+
   if (url.pathname === '/api/usage' && req.method === 'GET') {
-    const codex = await getCodexUsage();
-    const payload = {
-      fetchedAt: new Date().toISOString(),
-      codex: codex.ok
-        ? {
-            ...codex,
-            fiveHour: codex.fiveHour
-              ? { ...codex.fiveHour, resetIn: formatCountdown(codex.fiveHour.resetsAt), resetAtLocal: formatLocalTime(codex.fiveHour.resetsAt) }
-              : null,
-            weekly: codex.weekly
-              ? { ...codex.weekly, resetIn: formatCountdown(codex.weekly.resetsAt), resetAtLocal: formatLocalTime(codex.weekly.resetsAt) }
-              : null,
-          }
-        : codex,
-      claude: { ok: false, note: 'coming soon' },
-      gemini: { ok: false, note: 'coming soon' },
-    };
-    json(res, 200, payload);
+    const usage = await getUsageSummary();
+    json(res, 200, usage);
     return;
   }
 
