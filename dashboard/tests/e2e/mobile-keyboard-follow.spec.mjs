@@ -19,28 +19,16 @@ const MOBILE_TOOLBAR_HTML = `
 <div id="ttyd-mobile-toolbar" aria-label="Terminal mobile controls">
   <div id="ttyd-toolbar-main">
     <button type="button" id="ttyd-btn-ctrlc">Ctrl+C</button>
-    <button type="button" id="ttyd-btn-enter">Enter</button>
-    <button type="button" id="ttyd-btn-tab" data-input-only="1">Tab</button>
-    <button type="button" id="ttyd-btn-up" data-input-only="1">&#8593;</button>
-    <button type="button" id="ttyd-btn-down" data-input-only="1">&#8595;</button>
-    <button type="button" id="ttyd-btn-esc" data-input-only="1">Esc</button>
-    <button type="button" id="ttyd-btn-more" aria-expanded="false">More</button>
+    <button type="button" id="ttyd-btn-tab">Tab</button>
+    <button type="button" id="ttyd-btn-up">&#8593;</button>
+    <button type="button" id="ttyd-btn-down">&#8595;</button>
+    <button type="button" id="ttyd-btn-esc">Esc</button>
   </div>
-  <div id="ttyd-toolbar-drawer" hidden>
-    <div id="ttyd-drawer-pages">
-      <div class="ttyd-drawer-page">
-        <button type="button" id="ttyd-btn-wrap">Wrap On</button>
-        <button type="button" id="ttyd-btn-font-dec">A-</button>
-        <button type="button" id="ttyd-btn-font-inc">A+</button>
-      </div>
-      <div class="ttyd-drawer-page">
-        <button type="button" id="ttyd-btn-esc-alt">Esc</button>
-        <button type="button" id="ttyd-btn-tab-alt">Tab</button>
-        <button type="button" id="ttyd-btn-up-alt">&#8593;</button>
-        <button type="button" id="ttyd-btn-down-alt">&#8595;</button>
-      </div>
-    </div>
-    <div id="ttyd-font-size-label">Font: --px</div>
+  <div id="ttyd-toolbar-vim">
+    <button type="button" id="ttyd-btn-ctrld">Ctrl+D</button>
+    <button type="button" id="ttyd-btn-bracket">[</button>
+    <button type="button" id="ttyd-btn-pgup">PgUp</button>
+    <button type="button" id="ttyd-btn-pgdn">PgDn</button>
   </div>
 </div>
 `;

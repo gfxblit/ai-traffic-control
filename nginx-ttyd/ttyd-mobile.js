@@ -3,7 +3,7 @@
   var MAX_FONT = 36;
   var DEFAULT_FONT = 24;
   var STORAGE_KEY = "ttyd_mobile_font_size_v3";
-  var WRAP_KEY = "ttyd_mobile_wrap";
+
   var touchBound = false;
   var railInit = false;
   var historyLoaded = false;
@@ -94,10 +94,6 @@
     }, 60);
   }
 
-  function updateFontLabel(size) {
-    var label = document.getElementById("ttyd-font-size-label");
-    if (label) label.textContent = "Font: " + size + "px";
-  }
 
   function readFontSize() {
     var raw = localStorage.getItem(STORAGE_KEY);
@@ -129,21 +125,6 @@
     }, 120);
   }
 
-  function setWrapEnabled(enabled) {
-    var btn = document.getElementById("ttyd-btn-wrap");
-    if (btn) {
-      btn.textContent = enabled ? "Wrap On" : "Wrap Off";
-      btn.classList.toggle("active", enabled);
-    }
-    localStorage.setItem(WRAP_KEY, enabled ? "1" : "0");
-    sendSeq(enabled ? "\x1b[?7h" : "\x1b[?7l");
-    dispatchResizeTwice();
-  }
-
-  function toggleWrap() {
-    var enabled = localStorage.getItem(WRAP_KEY) !== "0";
-    setWrapEnabled(!enabled);
-  }
 
   function sendSeq(seq) {
     var term = getTerm();
@@ -206,9 +187,6 @@
     return document.getElementById("ttyd-mobile-toolbar");
   }
 
-  function drawer() {
-    return document.getElementById("ttyd-toolbar-drawer");
-  }
 
   function updateLayoutInsets() {
     var tb = toolbar();
@@ -224,38 +202,9 @@
     var tb = toolbar();
     if (!tb) return;
     tb.classList.toggle("keyboard-open", keyboardOpen);
-    if (!keyboardOpen) closeDrawer();
     if (keyboardOpen) scheduleKeepBottomInView();
   }
 
-  function openDrawer() {
-    var tb = toolbar();
-    var panel = drawer();
-    var trigger = document.getElementById("ttyd-btn-more");
-    if (!tb || !panel) return;
-    panel.hidden = false;
-    tb.classList.add("drawer-open");
-    if (trigger) trigger.setAttribute("aria-expanded", "true");
-    updateLayoutInsets();
-  }
-
-  function closeDrawer() {
-    var tb = toolbar();
-    var panel = drawer();
-    var trigger = document.getElementById("ttyd-btn-more");
-    if (!tb || !panel) return;
-    panel.hidden = true;
-    tb.classList.remove("drawer-open");
-    if (trigger) trigger.setAttribute("aria-expanded", "false");
-    updateLayoutInsets();
-  }
-
-  function toggleDrawer() {
-    var panel = drawer();
-    if (!panel) return;
-    if (panel.hidden) openDrawer();
-    else closeDrawer();
-  }
 
   function keyboardOffsetFromVisualViewport() {
     var vv = window.visualViewport;
@@ -610,62 +559,23 @@
   window.__ttydMobileSendSeq = sendSeq;
   window.__ttydMobileDebugSetKeyboardOffset = setKeyboardOffset;
 
-  function bind(id, seq, closeAfter) {
+  function bind(id, seq) {
     var el = document.getElementById(id);
     if (!el) return;
     el.addEventListener("click", function () {
       sendSeq(seq);
-      if (closeAfter) closeDrawer();
     });
   }
 
   bind("ttyd-btn-ctrlc", "\x03");
-  bind("ttyd-btn-enter", "\r");
   bind("ttyd-btn-esc", "\x1b");
   bind("ttyd-btn-tab", "\x09");
   bind("ttyd-btn-up", "\x1b[A");
   bind("ttyd-btn-down", "\x1b[B");
-  bind("ttyd-btn-esc-alt", "\x1b", true);
-  bind("ttyd-btn-tab-alt", "\x09", true);
-  bind("ttyd-btn-up-alt", "\x1b[A", true);
-  bind("ttyd-btn-down-alt", "\x1b[B", true);
-
-  var wrapBtn = document.getElementById("ttyd-btn-wrap");
-  if (wrapBtn) {
-    wrapBtn.addEventListener("click", function () {
-      toggleWrap();
-      closeDrawer();
-    });
-  }
-
-  var decBtn = document.getElementById("ttyd-btn-font-dec");
-  if (decBtn) {
-    decBtn.addEventListener("click", function () {
-      var current = readFontSize();
-      applyFontSize(current - 1);
-      closeDrawer();
-    });
-  }
-
-  var incBtn = document.getElementById("ttyd-btn-font-inc");
-  if (incBtn) {
-    incBtn.addEventListener("click", function () {
-      var current = readFontSize();
-      applyFontSize(current + 1);
-      closeDrawer();
-    });
-  }
-
-  var moreBtn = document.getElementById("ttyd-btn-more");
-  if (moreBtn) moreBtn.addEventListener("click", toggleDrawer);
-
-  document.addEventListener("click", function (e) {
-    var tb = toolbar();
-    var panel = drawer();
-    if (!tb || !panel || panel.hidden) return;
-    if (tb.contains(e.target)) return;
-    closeDrawer();
-  });
+  bind("ttyd-btn-ctrld", "\x04");
+  bind("ttyd-btn-bracket", "[");
+  bind("ttyd-btn-pgup", "\x1b[5~");
+  bind("ttyd-btn-pgdn", "\x1b[6~");
 
   document.addEventListener(
     "touchstart",
@@ -684,10 +594,10 @@
   window.addEventListener("load", function () {
     var flags = mobileFlags();
     var initialFont = readFontSize();
-    updateFontLabel(initialFont);
     applyFontSize(initialFont);
     ensureFontApplied(20);
-    setWrapEnabled(localStorage.getItem(WRAP_KEY) !== "0");
+    // Always enable wrap mode.
+    sendSeq("\x1b[?7h");
     installKeyboardAvoidance();
     if (flags.touchscroll) bindTouchScroll();
     if (flags.scrollbar) ensureScrollRail();

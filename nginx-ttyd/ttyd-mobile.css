@@ -22,12 +22,14 @@
 
 #ttyd-toolbar-main {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
-#ttyd-mobile-toolbar.keyboard-open #ttyd-toolbar-main {
+#ttyd-toolbar-vim {
+  display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
 }
 
 #ttyd-mobile-toolbar button {
@@ -47,51 +49,8 @@
   touch-action: manipulation;
 }
 
-#ttyd-mobile-toolbar:not(.keyboard-open) [data-input-only] {
-  display: none;
-}
-
 #ttyd-mobile-toolbar .active {
   background: #0f766e;
-}
-
-#ttyd-toolbar-drawer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-#ttyd-drawer-pages {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 100%;
-  gap: 8px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-}
-
-#ttyd-drawer-pages::-webkit-scrollbar {
-  display: none;
-}
-
-.ttyd-drawer-page {
-  scroll-snap-align: start;
-  display: grid;
-  gap: 8px;
-}
-
-.ttyd-drawer-page:first-child {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.ttyd-drawer-page:last-child {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-#ttyd-mobile-toolbar #ttyd-font-size-label {
-  display: none;
 }
 
 html, body {
