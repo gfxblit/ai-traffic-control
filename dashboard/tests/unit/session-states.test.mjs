@@ -132,3 +132,67 @@ test('durationSince returns days and hours for multi-day durations', () => {
 test('durationSince returns n/a for invalid ISO string', () => {
   assert.equal(durationSince('garbage'), 'n/a');
 });
+
+// ---------------------------------------------------------------------------
+// Tmux pane state parsing (replicates readTmuxSlotPaneState logic)
+// ---------------------------------------------------------------------------
+
+function parseTmuxPaneOutput(stdout) {
+  const rows = (stdout || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [windowName, paneActive, paneCurrentPath, windowActivity] = line.split('\t');
+      return {
+        windowName: windowName || '',
+        paneActive: paneActive === '1',
+        paneCurrentPath: paneCurrentPath || null,
+        windowActivity: Number(windowActivity),
+      };
+    });
+  if (rows.length === 0) return null;
+
+  const preferred = rows.find((row) => row.windowName === 'atc') || rows.find((row) => row.paneActive) || rows[0];
+  const activityMs = Number.isFinite(preferred.windowActivity) && preferred.windowActivity > 0 ? preferred.windowActivity * 1000 : null;
+  return {
+    cwd: preferred.paneCurrentPath || null,
+    lastInteractionAt: activityMs ? new Date(activityMs).toISOString() : null,
+  };
+}
+
+test('tmux pane parser extracts window_activity as lastInteractionAt', () => {
+  const ts = Math.floor(Date.now() / 1000);
+  const stdout = `atc\t1\t/home/user/project\t${ts}`;
+  const result = parseTmuxPaneOutput(stdout);
+  assert.equal(result.cwd, '/home/user/project');
+  assert.equal(result.lastInteractionAt, new Date(ts * 1000).toISOString());
+});
+
+test('tmux pane parser returns null lastInteractionAt when activity is 0', () => {
+  const stdout = 'atc\t1\t/home/user\t0';
+  const result = parseTmuxPaneOutput(stdout);
+  assert.equal(result.lastInteractionAt, null);
+});
+
+test('tmux pane parser returns null for empty output', () => {
+  assert.equal(parseTmuxPaneOutput(''), null);
+  assert.equal(parseTmuxPaneOutput(null), null);
+});
+
+test('tmux pane parser prefers atc window over other windows', () => {
+  const ts1 = Math.floor(Date.now() / 1000) - 600;
+  const ts2 = Math.floor(Date.now() / 1000);
+  const stdout = `other\t1\t/tmp\t${ts1}\natc\t0\t/home/user\t${ts2}`;
+  const result = parseTmuxPaneOutput(stdout);
+  assert.equal(result.cwd, '/home/user');
+  assert.equal(result.lastInteractionAt, new Date(ts2 * 1000).toISOString());
+});
+
+test('tmux pane parser falls back to active pane when no atc window', () => {
+  const ts = Math.floor(Date.now() / 1000);
+  const stdout = `bash\t0\t/tmp\t${ts - 100}\nzsh\t1\t/home\t${ts}`;
+  const result = parseTmuxPaneOutput(stdout);
+  assert.equal(result.cwd, '/home');
+  assert.equal(result.lastInteractionAt, new Date(ts * 1000).toISOString());
+});

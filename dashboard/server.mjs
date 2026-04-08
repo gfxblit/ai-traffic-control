@@ -851,7 +851,7 @@ async function readTmuxSlotPaneState(slotName) {
   const sessionName = tmuxSessionNameForSlot(slotName);
   const result = await runCommand(
     TMUX_BIN,
-    ['list-panes', '-t', sessionName, '-F', '#{window_name}\t#{pane_active}\t#{pane_current_path}\t#{session_activity}'],
+    ['list-panes', '-t', sessionName, '-F', '#{window_name}\t#{pane_active}\t#{pane_current_path}\t#{window_activity}'],
     3000
   );
   if (!result.ok) return null;
@@ -861,18 +861,18 @@ async function readTmuxSlotPaneState(slotName) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [windowName, paneActive, paneCurrentPath, sessionActivity] = line.split('\t');
+      const [windowName, paneActive, paneCurrentPath, windowActivity] = line.split('\t');
       return {
         windowName: windowName || '',
         paneActive: paneActive === '1',
         paneCurrentPath: paneCurrentPath || null,
-        sessionActivity: Number(sessionActivity),
+        windowActivity: Number(windowActivity),
       };
     });
   if (rows.length === 0) return null;
 
   const preferred = rows.find((row) => row.windowName === TMUX_SLOT_WINDOW) || rows.find((row) => row.paneActive) || rows[0];
-  const activityMs = Number.isFinite(preferred.sessionActivity) && preferred.sessionActivity > 0 ? preferred.sessionActivity * 1000 : null;
+  const activityMs = Number.isFinite(preferred.windowActivity) && preferred.windowActivity > 0 ? preferred.windowActivity * 1000 : null;
   return {
     cwd: preferred.paneCurrentPath || null,
     lastInteractionAt: activityMs ? new Date(activityMs).toISOString() : null,
