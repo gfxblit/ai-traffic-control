@@ -32,9 +32,16 @@ const USAGE_TTL_MS = 10000;
 const TELEMETRY_INGEST_MS = Number(process.env.TELEMETRY_INGEST_MS || 2000);
 const TITLE_POLL_MS = Number(process.env.TITLE_POLL_MS || 300000);
 const SLOT_RUN_RETENTION = Number(process.env.SLOT_RUN_RETENTION || 3);
+const RECENT_WORKDIR_LIMIT = 5;
 const TEMPLATE_NEW_BRAINSTORM = 'new_brainstorm';
 const TEMPLATE_CONTINUE_WORK = 'continue_work';
 const PROVIDERS = new Set(['codex', 'claude', 'gemini']);
+const ENABLE_PROVIDER_AUTO_LAUNCH = process.env.ATC_AUTO_LAUNCH_PROVIDER !== '0';
+const PROVIDER_BOOT_COMMANDS = {
+  codex: String(process.env.ATC_PROVIDER_BOOTSTRAP_CODEX || 'codex --dangerously-bypass-approvals-and-sandbox').trim(),
+  claude: String(process.env.ATC_PROVIDER_BOOTSTRAP_CLAUDE || 'claude --dangerously-skip-permissions').trim(),
+  gemini: String(process.env.ATC_PROVIDER_BOOTSTRAP_GEMINI || 'gemini --yolo').trim(),
+};
 
 let usageCache = { value: null, fetchedAt: 0, pending: null };
 
@@ -128,11 +135,41 @@ function normalizeProvider(provider) {
   return PROVIDERS.has(normalized) ? normalized : 'codex';
 }
 
+function providerBootCommand(provider) {
+  const normalized = normalizeProvider(provider);
+  const command = PROVIDER_BOOT_COMMANDS[normalized];
+  return typeof command === 'string' ? command.trim() : '';
+}
+
 function normalizeTemplateId(templateId, fallbackTemplate = TEMPLATE_NEW_BRAINSTORM) {
   const normalized = String(templateId || '').trim().toLowerCase();
   if (!normalized) return normalizeTemplateId(fallbackTemplate, TEMPLATE_NEW_BRAINSTORM);
   if (normalized === TEMPLATE_CONTINUE_WORK) return TEMPLATE_CONTINUE_WORK;
   return TEMPLATE_NEW_BRAINSTORM;
+}
+
+function normalizeRecentWorkdirs(input) {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const value of input) {
+    const candidate = String(value || '').trim();
+    if (!candidate) continue;
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    out.push(resolved);
+    if (out.length >= RECENT_WORKDIR_LIMIT) break;
+  }
+  return out;
+}
+
+function appendRecentWorkdir(state, workdir) {
+  const candidate = String(workdir || '').trim();
+  if (!candidate) return;
+  const resolved = path.resolve(candidate);
+  const existing = normalizeRecentWorkdirs(state.recentWorkdirs);
+  state.recentWorkdirs = [resolved, ...existing.filter((entry) => entry !== resolved)].slice(0, RECENT_WORKDIR_LIMIT);
 }
 
 async function resolveWorkdirForSpawn(templateId, requestedWorkdir) {
@@ -338,7 +375,7 @@ function defaultSessionState(cfg) {
 
 async function loadState() {
   const cfg = await readSessionsConfig();
-  let current = { version: 1, updatedAt: new Date().toISOString(), sessions: {} };
+  let current = { version: 1, updatedAt: new Date().toISOString(), sessions: {}, recentWorkdirs: [] };
   try {
     const raw = await fs.readFile(STATE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
@@ -350,6 +387,7 @@ async function loadState() {
   }
 
   const merged = { ...current, version: 1, updatedAt: new Date().toISOString(), sessions: { ...current.sessions } };
+  merged.recentWorkdirs = normalizeRecentWorkdirs(current.recentWorkdirs);
   for (const slot of cfg) {
     if (!merged.sessions[slot.name]) merged.sessions[slot.name] = defaultSessionState(slot);
     merged.sessions[slot.name].name = slot.name;
@@ -383,6 +421,16 @@ async function saveState(state) {
   state.updatedAt = new Date().toISOString();
   await fs.writeFile(tmp, JSON.stringify(state, null, 2) + '\n', 'utf8');
   await fs.rename(tmp, STATE_FILE);
+}
+
+async function readRecentWorkdirsFromState() {
+  try {
+    const raw = await fs.readFile(STATE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return normalizeRecentWorkdirs(parsed?.recentWorkdirs);
+  } catch {
+    return [];
+  }
 }
 
 function checkPortOpen(port, host = '127.0.0.1', timeoutMs = 500) {
@@ -616,6 +664,21 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
 
   const selected = await runCommand(TMUX_BIN, ['select-window', '-t', `${sessionName}:${TMUX_SLOT_WINDOW}`], 3000);
   if (!selected.ok) throw new Error(`failed to select tmux window ${sessionName}:${TMUX_SLOT_WINDOW}: ${selected.stderr || 'unknown error'}`);
+}
+
+async function launchProviderInTmuxSlot(sessionName, provider) {
+  if (!ENABLE_PROVIDER_AUTO_LAUNCH) return;
+  const command = providerBootCommand(provider);
+  if (!command) return;
+
+  const target = `${sessionName}:${TMUX_SLOT_WINDOW}.0`;
+  // Let the shell initialize before injecting the provider command.
+  await new Promise((resolve) => setTimeout(resolve, 220));
+
+  const typed = await runCommand(TMUX_BIN, ['send-keys', '-t', target, '-l', command], 3000);
+  if (!typed.ok) throw new Error(`failed to stage provider command in tmux pane ${target}: ${typed.stderr || 'unknown error'}`);
+  const entered = await runCommand(TMUX_BIN, ['send-keys', '-t', target, 'Enter'], 3000);
+  if (!entered.ok) throw new Error(`failed to run provider command in tmux pane ${target}: ${entered.stderr || 'unknown error'}`);
 }
 
 async function readTmuxSlotPaneState(slotName) {
@@ -996,6 +1059,7 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
   const tmuxSessionName = tmuxSessionNameForSlot(slot.name);
   if (ENABLE_TMUX_BACKEND) {
     await ensureTmuxSlotWindow(tmuxSessionName, slotWorkdir, shellConfig);
+    await launchProviderInTmuxSlot(tmuxSessionName, sessionState.provider);
   }
   const ttydCommandArgs = ENABLE_TMUX_BACKEND
     ? [TMUX_BIN, 'attach-session', '-t', `${tmuxSessionName}:${TMUX_SLOT_WINDOW}`]
@@ -1004,7 +1068,21 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
   const out = fsSync.openSync(logFileForBackend(slot.backendPort), 'a');
   const child = spawn(
     TTYD_BIN,
-    ['-W', '-i', '127.0.0.1', '-p', String(slot.backendPort), '-t', 'scrollback=100000', '-t', 'disableResizeOverlay=true', '--', ...ttydCommandArgs],
+    [
+      '-W',
+      '-i',
+      '127.0.0.1',
+      '-p',
+      String(slot.backendPort),
+      '-t',
+      'scrollback=100000',
+      '-t',
+      'disableResizeOverlay=true',
+      '-t',
+      `titleFixed=${slot.name}`,
+      '--',
+      ...ttydCommandArgs,
+    ],
     {
       cwd: slotWorkdir,
       detached: true,
@@ -1137,6 +1215,7 @@ async function spawnSlotByName(name, options = {}) {
   st.provider = provider;
   st.templateId = templateId;
   st.workdir = workdir;
+  if (templateId === TEMPLATE_CONTINUE_WORK) appendRecentWorkdir(state, workdir);
 
   const alreadyUp = await checkPortOpen(slot.backendPort);
   if (alreadyUp) {
@@ -1733,6 +1812,49 @@ function renderPage() {
       display: grid;
       gap: 8px;
     }
+    .recent-workdirs {
+      margin-top: 10px;
+      border: 1px solid #2f456f;
+      border-radius: 10px;
+      background: #0f1a30;
+      padding: 8px;
+    }
+    .recent-workdirs-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #95acd9;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+    .recent-workdirs-list {
+      display: grid;
+      gap: 6px;
+    }
+    .recent-workdir-btn {
+      width: 100%;
+      text-align: left;
+      border: 1px solid #30486f;
+      border-radius: 8px;
+      background: #142340;
+      color: #d8e5ff;
+      padding: 7px 9px;
+      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      word-break: break-all;
+    }
+    .recent-workdir-btn.active {
+      border-color: #6491eb;
+      background: #1a2f57;
+      box-shadow: 0 0 0 1px #6491eb33 inset;
+    }
+    .recent-workdirs-empty {
+      color: #8ea5d2;
+      font-size: 12px;
+      margin: 0;
+    }
     .workdir-path {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
@@ -1879,6 +2001,10 @@ function renderPage() {
           <div class="workdir-path" id="workdir-path"></div>
           <button class="choose-btn" id="choose-workdir">Choose folder</button>
         </div>
+        <div class="recent-workdirs">
+          <div class="recent-workdirs-label">Recent Directories</div>
+          <div class="recent-workdirs-list" id="recent-workdirs-list"></div>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" id="intent-cancel">Cancel</button>
@@ -1961,6 +2087,7 @@ function renderPage() {
       gemini: '/assets/logos/google.svg?v=2',
     };
     const usageExpanded = new Set();
+    const recentWorkdirs = [];
 
     function clampPct(value) {
       const pct = Number(value ?? 0);
@@ -2211,9 +2338,23 @@ function renderPage() {
 
       const workdirBlock = document.getElementById('workdir-block');
       const workdirPath = document.getElementById('workdir-path');
+      const recentList = document.getElementById('recent-workdirs-list');
       const continueWork = intentState.templateId === 'continue_work';
       if (workdirBlock) workdirBlock.style.display = continueWork ? 'block' : 'none';
       if (workdirPath) workdirPath.textContent = intentState.workdir || HOME_DIRECTORY;
+      if (recentList) {
+        if (!recentWorkdirs.length) {
+          recentList.innerHTML = '<p class="recent-workdirs-empty">No recent directories yet.</p>';
+        } else {
+          recentList.innerHTML = recentWorkdirs
+            .slice(0, 5)
+            .map((entry) => {
+              const active = entry === intentState.workdir;
+              return '<button class="recent-workdir-btn ' + (active ? 'active' : '') + '" data-recent-workdir="' + esc(entry) + '">' + esc(entry) + '</button>';
+            })
+            .join('');
+        }
+      }
 
       bindIntentModalInteractions();
       bindProviderSwipe();
@@ -2301,6 +2442,19 @@ function renderPage() {
         chooseWorkdir.dataset.bound = '1';
         chooseWorkdir.addEventListener('click', function () {
           openDirPicker();
+        });
+      }
+
+      const recentList = document.getElementById('recent-workdirs-list');
+      if (recentList && recentList.dataset.bound !== '1') {
+        recentList.dataset.bound = '1';
+        recentList.addEventListener('click', function (ev) {
+          const btn = ev.target.closest('[data-recent-workdir]');
+          if (!btn) return;
+          const nextWorkdir = btn.getAttribute('data-recent-workdir');
+          if (!nextWorkdir) return;
+          intentState.workdir = nextWorkdir;
+          renderIntentModal();
         });
       }
     }
@@ -2527,6 +2681,8 @@ function renderPage() {
       latestUsage = usage || {};
       const sessionsPayload = await sessionsResp.json();
       const sessions = sessionsPayload.sessions || [];
+      const latestRecent = Array.isArray(sessionsPayload.recentWorkdirs) ? sessionsPayload.recentWorkdirs : [];
+      recentWorkdirs.splice(0, recentWorkdirs.length, ...latestRecent);
 
       const usageGrid = document.getElementById('usage-grid');
       const rows = [
@@ -2590,8 +2746,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/sessions' && req.method === 'GET') {
-    const sessions = await getMergedSessions();
-    json(res, 200, { sessions, fetchedAt: new Date().toISOString() });
+    const [sessions, recentWorkdirs] = await Promise.all([getMergedSessions(), readRecentWorkdirsFromState()]);
+    json(res, 200, { sessions, recentWorkdirs, fetchedAt: new Date().toISOString() });
     return;
   }
 

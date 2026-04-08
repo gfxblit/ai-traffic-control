@@ -3,7 +3,6 @@ nginx-ttyd/logs/*.pid
 nginx-ttyd/logs/nginx.pid
 nginx-ttyd-test/
 nginx-ttyd-notmux/
-vibetunnel/
 dashboard/run/
 dashboard/state/
 dashboard/runtime/
