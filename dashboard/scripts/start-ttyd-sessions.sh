@@ -2,13 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 SESSIONS_FILE="${SESSIONS_FILE:-$ROOT_DIR/sessions.json}"
 STATE_FILE="${SESSIONS_STATE_FILE:-$ROOT_DIR/state/sessions-state.json}"
 RUN_DIR="$ROOT_DIR/run"
 NGINX_PREFIX="$RUN_DIR/nginx"
 NGINX_CONF="$RUN_DIR/nginx-sessions.conf"
 NGINX_BIN="${NGINX_BIN:-/opt/homebrew/opt/nginx/bin/nginx}"
-ASSETS_DIR="${ASSETS_DIR:-/Users/nihal/Code/MobileDev/nginx-ttyd}"
+ASSETS_DIR="${ASSETS_DIR:-$REPO_ROOT/nginx-ttyd}"
 
 mkdir -p "$RUN_DIR" "$NGINX_PREFIX/logs" "$(dirname "$STATE_FILE")"
 
@@ -62,6 +63,7 @@ const fs=require("fs");
 const path=require("path");
 const sessions=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 const stateFile=process.argv[2];
+const defaultWorkdir=process.argv[3];
 const out={version:1,updatedAt:new Date().toISOString(),sessions:{}};
 for (const s of sessions) {
   const name=String(s.name ?? "").trim();
@@ -70,7 +72,7 @@ for (const s of sessions) {
     name,
     status:"idle",
     taskTitle:`${name} task`,
-    workdir:"/Users/nihal/Code/MobileDev",
+    workdir:defaultWorkdir,
     agentType:"none",
     spawnedAt:null,
     runId:null,
@@ -83,7 +85,7 @@ for (const s of sessions) {
 }
 fs.mkdirSync(path.dirname(stateFile), { recursive: true });
 fs.writeFileSync(stateFile, JSON.stringify(out, null, 2) + "\n", "utf8");
-' "$SESSIONS_FILE" "$STATE_FILE"
+' "$SESSIONS_FILE" "$STATE_FILE" "$REPO_ROOT"
 
 cat >"$NGINX_CONF" <<EOF
 worker_processes 1;
