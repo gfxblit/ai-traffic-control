@@ -2586,8 +2586,45 @@ function renderPage() {
       name: '',
     };
 
+    let bodyScrollLockDepth = 0;
+    let bodyScrollLockY = 0;
+
     function toggleBodyScroll(locked) {
-      document.body.classList.toggle('modal-open', !!locked);
+      const body = document.body;
+      if (!body) return;
+
+      if (locked) {
+        bodyScrollLockDepth += 1;
+        if (bodyScrollLockDepth > 1) return;
+        bodyScrollLockY = window.scrollY || window.pageYOffset || 0;
+        body.classList.add('modal-open');
+        body.style.position = 'fixed';
+        body.style.top = '-' + bodyScrollLockY + 'px';
+        body.style.left = '0';
+        body.style.right = '0';
+        body.style.width = '100%';
+        body.style.overflow = 'hidden';
+        return;
+      }
+
+      if (bodyScrollLockDepth <= 0) return;
+      bodyScrollLockDepth -= 1;
+      if (bodyScrollLockDepth > 0) return;
+
+      const activeEl = document.activeElement;
+      if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+      const restoreY = bodyScrollLockY;
+      body.classList.remove('modal-open');
+      body.style.position = '';
+      body.style.top = '';
+      body.style.left = '';
+      body.style.right = '';
+      body.style.width = '';
+      body.style.overflow = '';
+      window.scrollTo(0, restoreY);
+      requestAnimationFrame(function () {
+        window.scrollTo(0, restoreY);
+      });
     }
 
     function esc(v) {
