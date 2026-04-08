@@ -125,7 +125,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
 
       sub_filter_once on;
       sub_filter "</body>" '
-<link rel="stylesheet" href="/ttyd-mobile.css?v=14" />
+<link rel="stylesheet" href="/ttyd-mobile.css?v=16" />
 <div id="ttyd-mobile-toolbar" aria-label="Terminal mobile controls">
   <div id="ttyd-toolbar-main">
     <button type="button" id="ttyd-btn-ctrlc">Ctrl+C</button>
@@ -160,7 +160,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
     touchscroll: false
   };
 </script>
-<script src="/ttyd-mobile.js?v=13"></script>
+<script src="/ttyd-mobile.js?v=16"></script>
 </body>';
     }
 

@@ -94,9 +94,19 @@
   display: none;
 }
 
+html, body {
+  overflow: auto !important;
+}
+
 body {
   padding-bottom: calc(var(--ttyd-bottom-inset) + env(safe-area-inset-bottom, 0px)) !important;
   box-sizing: border-box;
+}
+
+/* Shrink terminal container when keyboard is open so xterm.js re-fits rows */
+#terminal-container {
+  max-height: calc(100vh - var(--ttyd-bottom-inset, 96px)) !important;
+  transition: max-height 0.1s ease-out;
 }
 
 .xterm .xterm-viewport {

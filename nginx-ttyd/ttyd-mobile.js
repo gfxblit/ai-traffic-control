@@ -9,6 +9,7 @@
   var historyLoaded = false;
   var keyboardOpen = false;
   var keyboardOffsetPx = 0;
+  var followBottomTimer = 0;
 
   function getViewport() {
     return document.querySelector(".xterm .xterm-viewport");
@@ -17,6 +18,45 @@
   function getTerm() {
     if (window.term && window.term.options) return window.term;
     return null;
+  }
+
+  function isTerminalFocusTarget(node) {
+    if (!node) return false;
+    if (node.classList && node.classList.contains("xterm-helper-textarea")) return true;
+    return !!(node.closest && node.closest(".xterm, #terminal-container, .xterm-screen, .xterm-viewport"));
+  }
+
+  var inKeepBottom = false;
+  function keepTerminalBottomInView() {
+    if (inKeepBottom) return;
+    inKeepBottom = true;
+    try {
+      // Resize the terminal so xterm.js re-fits rows to the reduced visible area.
+      dispatchResizeTwice();
+      // Scroll the xterm viewport to show the latest terminal lines (cursor row).
+      var viewport = getViewport();
+      if (viewport) viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      // Scroll the page so the terminal bottom sits above the toolbar/keyboard.
+      var scroller = document.scrollingElement || document.documentElement;
+      if (scroller) scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      window.scrollTo(0, document.body ? document.body.scrollHeight : 0);
+    } finally {
+      // Release guard after resize events settle.
+      setTimeout(function () { inKeepBottom = false; }, 100);
+    }
+  }
+
+  function scheduleKeepBottomInView() {
+    if (followBottomTimer) clearTimeout(followBottomTimer);
+    keepTerminalBottomInView();
+    // Keyboard and visual viewport changes can settle in multiple frames on mobile.
+    var attempts = 0;
+    (function settle() {
+      attempts += 1;
+      keepTerminalBottomInView();
+      if (attempts >= 8) return;
+      followBottomTimer = setTimeout(settle, 70);
+    })();
   }
 
   function queryParam(name) {
@@ -159,6 +199,7 @@
     document.documentElement.style.setProperty("--ttyd-kb-offset", n + "px");
     setKeyboardOpen(n >= 40);
     updateLayoutInsets();
+    if (n >= 40) scheduleKeepBottomInView();
   }
 
   function toolbar() {
@@ -184,6 +225,7 @@
     if (!tb) return;
     tb.classList.toggle("keyboard-open", keyboardOpen);
     if (!keyboardOpen) closeDrawer();
+    if (keyboardOpen) scheduleKeepBottomInView();
   }
 
   function openDrawer() {
@@ -263,6 +305,9 @@
     window.addEventListener("resize", schedule);
     window.addEventListener("focus", schedule);
     document.addEventListener("focusin", schedule);
+    document.addEventListener("focusin", function (e) {
+      if (isTerminalFocusTarget(e.target)) scheduleKeepBottomInView();
+    });
     document.addEventListener("focusout", function () {
       // Android browsers sometimes lag viewport updates after keyboard close.
       setTimeout(schedule, 160);
@@ -563,6 +608,7 @@
   }
 
   window.__ttydMobileSendSeq = sendSeq;
+  window.__ttydMobileDebugSetKeyboardOffset = setKeyboardOffset;
 
   function bind(id, seq, closeAfter) {
     var el = document.getElementById(id);
@@ -629,6 +675,7 @@
       if (node.closest("#ttyd-mobile-toolbar")) return;
       if (node.closest(".xterm, #terminal-container, .xterm-screen, .xterm-viewport")) {
         focusTerminal();
+        scheduleKeepBottomInView();
       }
     },
     { passive: true, capture: true }
@@ -653,5 +700,6 @@
     if (flags.touchscroll) bindTouchScroll();
     if (flags.scrollbar) ensureScrollRail();
     updateLayoutInsets();
+    if (keyboardOpen) scheduleKeepBottomInView();
   });
 })();
