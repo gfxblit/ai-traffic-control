@@ -69,10 +69,44 @@ When `codex` runs inside a spawned slot shell, native Codex hook payloads are fo
 Claude uses repo-local `.claude/settings.json` and the same forwarder, so Codex and Claude events land in the same per-slot schema.
 
 Derived metrics are computed in the dashboard process:
-- `TELEMETRY_INGEST_MS` (default `20000`)
+- `TELEMETRY_INGEST_MS` (default `2000`)
 - `TITLE_POLL_MS` (default `300000`)
 
 Per-slot context usage is shown only when hooks provide an explicit percent field; otherwise the UI displays `N/A`.
+
+## Provider launch + permissions mode
+
+When an idle scientist is started from the dashboard, the backend:
+1. Creates/respawns the slot tmux session/window.
+2. Launches `ttyd` attached to that tmux pane.
+3. Auto-types the selected provider command into the pane and presses Enter.
+
+Default provider startup commands are defined in `dashboard/server.mjs`:
+- `codex --dangerously-bypass-approvals-and-sandbox`
+- `claude --dangerously-skip-permissions`
+- `gemini --yolo`
+
+These defaults can be overridden with env vars:
+- `ATC_PROVIDER_BOOTSTRAP_CODEX`
+- `ATC_PROVIDER_BOOTSTRAP_CLAUDE`
+- `ATC_PROVIDER_BOOTSTRAP_GEMINI`
+
+You can disable auto-launch entirely with:
+- `ATC_AUTO_LAUNCH_PROVIDER=0`
+
+Notes:
+- Flags above were verified from local CLI help output (`codex --help`, `claude --help`, `gemini --help`).
+- `ttyd` client title is pinned per slot via `titleFixed=<scientist-name>` in spawn code, so browser tabs show the scientist name.
+
+## Where to edit this later
+
+If you want to change spawn behavior in the future, edit:
+- Provider command defaults/env mapping: `dashboard/server.mjs`
+  at `PROVIDER_BOOT_COMMANDS`
+- Auto-launch injection into tmux: `dashboard/server.mjs`
+  at `launchProviderInTmuxSlot(...)`
+- `ttyd` terminal options/title: `dashboard/server.mjs`
+  at `spawnSessionBackend(...)`
 
 ## Fast Mobile UI Feedback
 
@@ -97,8 +131,8 @@ npm run test
 ```
 
 This runs:
-- Unit: `tests/unit/shell-hook-writer.test.mjs`
-- E2E: `tests/e2e/terminal-smoke.spec.mjs` (spawns a slot, types via ttyd, validates file-write execution, validates `shell_start`/`preexec`/`precmd`/`chpwd`, validates dashboard derived telemetry)
+- Unit: `tests/unit/*.test.mjs`
+- E2E: `tests/e2e/*.spec.mjs` (includes terminal smoke, persona selector, tmux cwd tracking, and mobile behavior specs)
 
 Or run from repo root:
 
