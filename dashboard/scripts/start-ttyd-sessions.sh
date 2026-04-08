@@ -102,6 +102,11 @@ http {
   access_log logs/access.log;
   sendfile on;
   keepalive_timeout 65;
+
+  map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    '' close;
+  }
 EOF
 
 while IFS=$'\t' read -r _name public_port backend_port _description; do
@@ -115,7 +120,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
       proxy_http_version 1.1;
       proxy_set_header Host \$host;
       proxy_set_header Upgrade \$http_upgrade;
-      proxy_set_header Connection "upgrade";
+      proxy_set_header Connection \$connection_upgrade;
       proxy_set_header Accept-Encoding "";
 
       sub_filter_once on;

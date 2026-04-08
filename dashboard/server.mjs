@@ -278,7 +278,7 @@ async function waitForTtydReady(port, timeoutMs = 10000) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 900);
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/`, {
+      const response = await fetch(`http://127.0.0.1:${port}/?atc_ready_probe=1`, {
         method: 'GET',
         cache: 'no-store',
         signal: ctl.signal,
@@ -847,10 +847,18 @@ async function spawnSlotByName(name) {
   await rotateSlotCurrent(slot.name, st.runId);
   const { paths, hookEnv } = await ensureSlotRuntime(slot.name, runId, st.workdir);
   const pid = await spawnSessionBackend(slot, st, { ...hookEnv }, { zdotdir: paths.zdotdir });
-  const ready = await waitForTtydReady(slot.backendPort, 10000);
-  if (!ready) {
+  const backendReady = await waitForTtydReady(slot.backendPort, 10000);
+  if (!backendReady) {
     await killSessionBackend(slot, { pid });
     throw new Error(`ttyd backend ${slot.backendPort} did not become ready in time`);
+  }
+  const publicListenerPresent = await checkPortOpen(slot.publicPort);
+  if (publicListenerPresent) {
+    const publicReady = await waitForTtydReady(slot.publicPort, 10000);
+    if (!publicReady) {
+      await killSessionBackend(slot, { pid });
+      throw new Error(`public proxy ${slot.publicPort} did not become ready in time`);
+    }
   }
 
   st.status = 'active';
@@ -1146,6 +1154,26 @@ function renderPage() {
       return body;
     }
 
+    async function prewarmPublicEndpoint(port) {
+      const base = hostForPort(port);
+      const ctl = new AbortController();
+      const t = setTimeout(function () {
+        ctl.abort();
+      }, 1200);
+      try {
+        await fetch(base + '/?atc_prewarm=' + Date.now(), {
+          method: 'GET',
+          cache: 'no-store',
+          signal: ctl.signal,
+          credentials: 'omit',
+        });
+      } catch (_e) {
+        // best-effort only
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
     async function spawnSession(name) {
       if (refreshing.has(name)) return;
       refreshing.add(name);
@@ -1235,6 +1263,7 @@ function renderPage() {
           const isWarming = active && warmUntil > Date.now();
           if (isSpawning || isWarming) return;
           if (active) {
+            await prewarmPublicEndpoint(item.publicPort);
             window.open(connectUrlForPort(item.publicPort), '_blank', 'noopener,noreferrer');
             return;
           }
