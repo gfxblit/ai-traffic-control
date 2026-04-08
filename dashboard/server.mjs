@@ -1021,6 +1021,7 @@ function renderPage() {
       letter-spacing: 0.3px;
     }
     .badge.active { border-color: #0f8e68; background: #0a3f31; color: #8ef6d3; }
+    .badge.starting { border-color: #4a4d78; background: #20274a; color: #d5ddff; }
     .badge.idle { border-color: #72570f; background: #3f300c; color: #ffd98a; }
 
     .line { color: #d8e2ff; font-size: 13px; margin: 3px 0; }
@@ -1052,8 +1053,23 @@ function renderPage() {
       border-top: 1px dashed #324365;
       padding-top: 8px;
     }
+    .warmup {
+      margin-top: 8px;
+      border: 1px solid #2c3f67;
+      border-radius: 999px;
+      background: #101a34;
+      height: 8px;
+      overflow: hidden;
+    }
+    .warmup-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #6ba7ff 0%, #8c7bff 70%, #55d7b5 100%);
+      transition: width 120ms linear;
+    }
     .color-idle { color: var(--amber); }
     .color-active { color: var(--green); }
+    .color-starting { color: #cdd8ff; }
     .error { color: var(--red); }
 
     @media (max-width: 640px) {
@@ -1080,6 +1096,10 @@ function renderPage() {
 
   <script>
     const refreshing = new Set();
+    const spawning = new Set();
+    const connectWarmupUntil = new Map();
+    const CONNECT_WARMUP_MS = 2500;
+    const POST_SPAWN_COOLDOWN_MS = 1800;
 
     function esc(v) {
       return String(v)
@@ -1129,13 +1149,25 @@ function renderPage() {
     async function spawnSession(name) {
       if (refreshing.has(name)) return;
       refreshing.add(name);
+      spawning.add(name);
+      connectWarmupUntil.set(name, Date.now() + CONNECT_WARMUP_MS);
+      refresh().catch(() => {});
+      let spawnOk = false;
       try {
         await apiPost('/api/sessions/spawn', { name: name });
+        spawnOk = true;
+        connectWarmupUntil.set(name, Math.max(Number(connectWarmupUntil.get(name) || 0), Date.now() + POST_SPAWN_COOLDOWN_MS));
       } catch (err) {
         alert('Spawn failed for ' + name + ': ' + err.message);
       } finally {
+        if (!spawnOk) connectWarmupUntil.delete(name);
+        spawning.delete(name);
         refreshing.delete(name);
         await refresh();
+        setTimeout(refresh, 350);
+        setTimeout(refresh, 900);
+        setTimeout(refresh, 1600);
+        setTimeout(refresh, 2400);
       }
     }
 
@@ -1144,6 +1176,7 @@ function renderPage() {
       refreshing.add(name);
       try {
         await apiPost('/api/sessions/kill', { name: name });
+        connectWarmupUntil.delete(name);
       } catch (err) {
         alert('Kill failed for ' + name + ': ' + err.message);
       } finally {
@@ -1154,15 +1187,21 @@ function renderPage() {
 
     function sessionCard(s) {
       const isActive = s.status === 'active' && s.backendActive;
-      const actionText = isActive ? 'Tap to connect' : 'Tap to spawn';
-      const actionClass = isActive ? 'color-active' : 'color-idle';
+      const warmUntil = Number(connectWarmupUntil.get(s.name) || 0);
+      const isSpawning = spawning.has(s.name);
+      const isWarming = isSpawning || (isActive && warmUntil > Date.now());
+      const warmPct = isWarming ? Math.max(0, Math.min(100, Math.round(((CONNECT_WARMUP_MS - (warmUntil - Date.now())) / CONNECT_WARMUP_MS) * 100))) : 100;
+      const actionText = isWarming ? 'Starting terminal…' : (isActive ? 'Tap to connect' : 'Tap to spawn');
+      const actionClass = isWarming ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
+      const badgeClass = isWarming ? 'starting' : (isActive ? 'active' : 'idle');
+      const badgeText = isWarming ? 'starting' : (isActive ? 'active' : 'idle');
 
-      return '<article class="session tap" data-name="' + esc(s.name) + '" data-active="' + (isActive ? '1' : '0') + '">' +
+      return '<article class="session tap" data-name="' + esc(s.name) + '" data-active="' + (isActive ? '1' : '0') + '" data-warming="' + (isWarming ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
         '<button class="kill" ' + (isActive ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
         '<div class="session-inner">' +
           '<div class="head">' +
             '<div class="name">' + esc(s.name) + '</div>' +
-            '<span class="badge ' + esc(isActive ? 'active' : 'idle') + '">' + esc(isActive ? 'active' : 'idle') + '</span>' +
+            '<span class="badge ' + esc(badgeClass) + '">' + esc(badgeText) + '</span>' +
           '</div>' +
           '<div class="line"><strong>Task:</strong> ' + esc(s.taskTitle || 'Not set') + '</div>' +
           '<div class="line"><strong>Workdir:</strong> ' + esc(s.workdir || 'Not set') + '</div>' +
@@ -1172,6 +1211,7 @@ function renderPage() {
           '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + esc(s.lastInteractionAgo || 'n/a') + '</div>' +
           '<div class="line muted">Shell: ' + esc(compact((s.telemetry && s.telemetry.lastCommand) ? s.telemetry.lastCommand : 'no command yet', 60)) + '</div>' +
           '<div class="line muted">Last event: ' + esc((s.telemetry && s.telemetry.lastEventType) ? s.telemetry.lastEventType : 'n/a') + ' | Last cmd duration: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.durationMs))) ? (Math.round(Number(s.telemetry.durationMs)) + 'ms') : 'n/a') + '</div>' +
+          (isWarming ? '<div class="warmup"><div class="warmup-fill" style="width:' + warmPct + '%"></div></div>' : '') +
           (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
           '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
         '</div>' +
@@ -1190,6 +1230,10 @@ function renderPage() {
           if (!item) return;
 
           const active = item.status === 'active' && item.backendActive;
+          const isSpawning = spawning.has(item.name);
+          const warmUntil = Number(connectWarmupUntil.get(item.name) || 0);
+          const isWarming = active && warmUntil > Date.now();
+          if (isSpawning || isWarming) return;
           if (active) {
             window.open(connectUrlForPort(item.publicPort), '_blank', 'noopener,noreferrer');
             return;
@@ -1219,6 +1263,10 @@ function renderPage() {
       const usage = await usageResp.json();
       const sessionsPayload = await sessionsResp.json();
       const sessions = sessionsPayload.sessions || [];
+      const nowTs = Date.now();
+      for (const [key, until] of connectWarmupUntil.entries()) {
+        if (!Number.isFinite(until) || until <= nowTs) connectWarmupUntil.delete(key);
+      }
 
       const usageGrid = document.getElementById('usage-grid');
       const cards = [];
