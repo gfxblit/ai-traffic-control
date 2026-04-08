@@ -1727,25 +1727,23 @@ function renderPage() {
       transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
       min-height: 128px;
       display: grid;
-      grid-template-columns: clamp(92px, 16vw, 108px) minmax(0, 1fr);
+      grid-template-columns: clamp(92px, 18vw, 126px) minmax(0, 1fr);
       align-items: stretch;
     }
     .session-media {
       position: relative;
       overflow: hidden;
-      display: grid;
-      place-items: center;
-      padding: 10px;
       background: radial-gradient(circle at 35% 20%, #20315c, #0d152a 72%);
       border-right: 1px solid #2d3e66;
+      align-self: stretch;
     }
     .session-media-fallback {
       display: grid;
       place-items: center;
-      width: 72px;
-      height: 72px;
-      border-radius: 12px;
-      border: 1px solid #2d3e66;
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      border: 0;
       color: #d8e5ff;
       font-size: 22px;
       font-weight: 800;
@@ -1755,10 +1753,10 @@ function renderPage() {
     }
     .session-picture {
       display: block;
-      width: 72px;
-      height: 72px;
-      border-radius: 12px;
-      border: 1px solid #2d3e66;
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      border: 0;
       object-fit: cover;
       object-position: center top;
     }
@@ -1771,7 +1769,7 @@ function renderPage() {
     }
     .session-body {
       min-width: 0;
-      padding: 12px 46px 12px 12px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
@@ -1801,16 +1799,23 @@ function renderPage() {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
       margin-bottom: 8px;
+      padding-right: 42px;
+    }
+    .head-main {
+      min-width: 0;
+      flex: 1;
+      display: grid;
+      gap: 6px;
     }
     .name { font-size: 17px; font-weight: 700; }
     .head-badges {
       display: flex;
       flex-wrap: wrap;
-      justify-content: flex-end;
+      justify-content: flex-start;
       gap: 6px;
-      max-width: 62%;
+      max-width: 100%;
     }
     .badge {
       font-size: 11px;
@@ -1860,6 +1865,7 @@ function renderPage() {
       display: grid;
       place-items: center;
       cursor: pointer;
+      z-index: 2;
     }
     .kill[disabled] { opacity: 0.35; cursor: not-allowed; }
 
@@ -2184,17 +2190,18 @@ function renderPage() {
       .title { font-size: 22px; }
       .title .decor { font-size: 18px; }
       .provider { grid-template-columns: 46px 1fr; }
-      .provider-logo { min-height: 58px; padding: 8px; }
+      .provider-logo {
+        width: 46px;
+        height: 46px;
+        padding: 7px;
+      }
       .provider-select-logo { box-sizing: border-box; display: block; }
       .usage-row.expanded .provider { grid-template-columns: 46px 1fr; }
       .mini { grid-template-columns: 62px 34px minmax(0, 1.35fr) minmax(84px, 0.9fr); gap: 5px; }
       .mini-label, .mini-pct, .mini-reset { font-size: 10px; }
       .windows { grid-template-columns: 1fr; }
-      .session { grid-template-columns: 88px minmax(0, 1fr); }
-      .session-media { padding: 8px; }
-      .session-media-fallback,
-      .session-picture { width: 64px; height: 64px; }
-      .session-body { padding: 10px 42px 10px 10px; }
+      .session { grid-template-columns: 96px minmax(0, 1fr); }
+      .session-body { padding: 10px; }
       .name { font-size: 16px; }
       .template-grid { grid-template-columns: 1fr; }
     }
@@ -2949,6 +2956,8 @@ function renderPage() {
       const personaId = normalizePersonaId(s.personaId);
       const pictureSrc = sessionPictureSrc(s);
       const pictureAlt = s.name + ' portrait';
+      const rawTaskTitle = String(s.taskTitle || '').trim();
+      const taskTitle = rawTaskTitle && !/^shell:\s*/i.test(rawTaskTitle) ? rawTaskTitle : 'Not set';
       const actionText = isSpawning ? 'Starting terminal…' : (isActive ? 'Tap to connect' : 'Tap to start');
       const actionClass = isSpawning ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
       const badgeClass = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
@@ -2963,13 +2972,15 @@ function renderPage() {
         '</div>' +
         '<div class="session-body">' +
           '<div class="head">' +
-            '<div class="name">' + esc(s.name) + '</div>' +
-            '<div class="head-badges">' +
-              '<span class="badge ' + esc(badgeClass) + '">' + esc(badgeText) + '</span>' +
-              personaBadge(personaId) +
+            '<div class="head-main">' +
+              '<div class="name">' + esc(s.name) + '</div>' +
+              '<div class="head-badges">' +
+                '<span class="badge ' + esc(badgeClass) + '">' + esc(badgeText) + '</span>' +
+                personaBadge(personaId) +
+              '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="line"><strong>Task:</strong> ' + esc(s.taskTitle || 'Not set') + '</div>' +
+          '<div class="line"><strong>Task:</strong> ' + esc(taskTitle) + '</div>' +
           '<div class="line"><strong>Workdir:</strong> ' + esc(s.workdir || 'Not set') + '</div>' +
           (hasAgent
             ? '<div class="line muted">Agent: ' + esc(s.agentType || 'none') + ' | Turns: ' + esc((s.telemetry && s.telemetry.turnCount) ? s.telemetry.turnCount : 0) + '</div>'
@@ -2978,7 +2989,6 @@ function renderPage() {
             ? '<div class="line muted">Context window: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.contextWindowPct))) ? (Math.round(Number(s.telemetry.contextWindowPct)) + '%') : 'N/A') + '</div>'
             : '') +
           '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + esc(s.lastInteractionAgo || 'n/a') + '</div>' +
-          '<div class="line muted">Shell: ' + esc(compact((s.telemetry && s.telemetry.lastCommand) ? s.telemetry.lastCommand : 'no command yet', 60)) + '</div>' +
           (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
           '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
         '</div>' +
