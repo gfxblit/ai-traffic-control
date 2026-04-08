@@ -135,7 +135,7 @@ while IFS=$'\t' read -r _name public_port backend_port _description; do
     <button type="button" id="ttyd-btn-esc">Esc</button>
   </div>
   <div id="ttyd-toolbar-vim">
-    <button type="button" id="ttyd-btn-ctrld">Ctrl+D</button>
+    <button type="button" id="ttyd-btn-ctrlb">Ctrl+B</button>
     <button type="button" id="ttyd-btn-bracket">[</button>
     <button type="button" id="ttyd-btn-pgup">PgUp</button>
     <button type="button" id="ttyd-btn-pgdn">PgDn</button>

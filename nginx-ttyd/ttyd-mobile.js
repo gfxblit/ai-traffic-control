@@ -106,7 +106,6 @@
     var term = getTerm();
     size = Math.max(MIN_FONT, Math.min(MAX_FONT, size));
     localStorage.setItem(STORAGE_KEY, String(size));
-    updateFontLabel(size);
     if (!term) return;
     term.options.fontSize = size;
     dispatchResizeTwice();
@@ -572,7 +571,7 @@
   bind("ttyd-btn-tab", "\x09");
   bind("ttyd-btn-up", "\x1b[A");
   bind("ttyd-btn-down", "\x1b[B");
-  bind("ttyd-btn-ctrld", "\x04");
+  bind("ttyd-btn-ctrlb", "\x02");
   bind("ttyd-btn-bracket", "[");
   bind("ttyd-btn-pgup", "\x1b[5~");
   bind("ttyd-btn-pgdn", "\x1b[6~");
