@@ -1824,6 +1824,7 @@ function renderPage() {
       overflow: hidden;
       background: radial-gradient(circle at 35% 20%, #20315c, #0d152a 72%);
       border-right: 1px solid #2d3e66;
+      border-radius: 13px 0 0 13px;
       align-self: stretch;
     }
     .session-media-fallback {
@@ -1897,20 +1898,14 @@ function renderPage() {
     }
     /* Card tints per session state */
     .session.state-active {
-      border-color: #0f8e68aa;
-      background: linear-gradient(130deg, #0a3f3166 0%, #0d2e2440 40%, #111831 100%);
-      box-shadow: 0 0 18px #0f8e6830 inset, 0 0 0 1px #0f8e6822 inset;
-    }
-    .session.state-active .session-media {
-      background: radial-gradient(circle at 35% 20%, #0f3d30, #0d152a 72%);
+      border-color: #0f8e68cc;
+      background: linear-gradient(130deg, #0a4f38cc 0%, #0d3e2c88 40%, #0c2a2044 80%, #111831 100%);
+      box-shadow: 0 0 32px #0f8e6860 inset, 0 0 0 1px #0f8e6844 inset;
     }
     .session.state-idle {
-      border-color: #72570faa;
-      background: linear-gradient(130deg, #3f300c55 0%, #2a200a40 40%, #111831 100%);
-      box-shadow: 0 0 18px #72570f30 inset, 0 0 0 1px #72570f22 inset;
-    }
-    .session.state-idle .session-media {
-      background: radial-gradient(circle at 35% 20%, #3a2c10, #0d152a 72%);
+      border-color: #72570fcc;
+      background: linear-gradient(130deg, #4f3a10cc 0%, #3a2a0c88 40%, #2a1e0844 80%, #111831 100%);
+      box-shadow: 0 0 32px #72570f60 inset, 0 0 0 1px #72570f44 inset;
     }
     .session.state-unborn {
       border-color: #333;
