@@ -122,3 +122,41 @@ test('shell hook writer appends events and updates meta/derived files', async ()
 
   await fs.rm(tmp, { recursive: true, force: true });
 });
+
+test('shell hook writer tolerates malformed stdin JSON and falls back to unknown event', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'atc-shell-hook-test-'));
+  const eventsFile = path.join(tmp, 'events.jsonl');
+  const metaFile = path.join(tmp, 'meta.json');
+  const derivedFile = path.join(tmp, 'derived.json');
+
+  await runWriter({
+    env: {
+      ATC_SLOT: 'Gauss',
+      ATC_RUN_ID: 'run-bad-stdin',
+      ATC_EVENTS_FILE: eventsFile,
+      ATC_META_FILE: metaFile,
+      ATC_DERIVED_FILE: derivedFile,
+    },
+    stdin: '{',
+  });
+
+  const lines = (await fs.readFile(eventsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.equal(lines.length, 1);
+  const first = JSON.parse(lines[0]);
+  assert.equal(first.slot, 'Gauss');
+  assert.equal(first.runId, 'run-bad-stdin');
+  assert.equal(first.eventType, 'unknown');
+  assert.equal(first.payload, null);
+  assert.equal(first.durationMs, null);
+
+  const meta = await readJson(metaFile);
+  assert.equal(meta.eventCount, 1);
+  assert.equal(meta.lastEventType, 'unknown');
+
+  const derived = await readJson(derivedFile);
+  assert.equal(derived.eventCount, 1);
+  assert.equal(derived.lastEventType, 'unknown');
+  assert.equal(derived.durationMs, null);
+
+  await fs.rm(tmp, { recursive: true, force: true });
+});

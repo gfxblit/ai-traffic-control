@@ -6,12 +6,19 @@ function ensureParent(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+function parseJsonObject(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function readJson(filePath, fallback) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed;
-    return fallback;
+    return parseJsonObject(raw) || fallback;
   } catch {
     return fallback;
   }
@@ -32,12 +39,46 @@ function readStdinJson() {
     if (stat.isCharacterDevice()) return null;
     const raw = fs.readFileSync(0, 'utf8').trim();
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed;
-    return null;
+    return parseJsonObject(raw);
   } catch {
     return null;
   }
+}
+
+function resolveOutputFiles(currentDir) {
+  const fallbackRoot = path.join(process.cwd(), 'dashboard', 'runtime');
+  const fallbackEvents = currentDir ? path.join(currentDir, 'events.jsonl') : path.join(fallbackRoot, 'unassigned-events.jsonl');
+  return {
+    eventsFile: process.env.ATC_EVENTS_FILE || fallbackEvents,
+    metaFile: process.env.ATC_META_FILE || (currentDir ? path.join(currentDir, 'meta.json') : path.join(fallbackRoot, 'meta-fallback.json')),
+    derivedFile: process.env.ATC_DERIVED_FILE || (currentDir ? path.join(currentDir, 'derived.json') : path.join(fallbackRoot, 'derived-fallback.json')),
+  };
+}
+
+function buildEvent({ nowIso, stdinEvent, slot, runId, provider }) {
+  const rawDuration = process.env.ATC_EVENT_DURATION_MS;
+  const durationMs = rawDuration === undefined || rawDuration === '' ? null : Number(rawDuration);
+  const stdinDurationMs = Number.isFinite(Number(stdinEvent?.durationMs)) ? Number(stdinEvent.durationMs) : null;
+  const eventType = process.env.ATC_EVENT_TYPE || stdinEvent?.hook_event_name || stdinEvent?.hookEventName || stdinEvent?.eventType || stdinEvent?.type || 'unknown';
+  const cwd = process.env.ATC_EVENT_CWD || stdinEvent?.cwd || stdinEvent?.workdir || null;
+  const command =
+    process.env.ATC_EVENT_COMMAND ||
+    stdinEvent?.command ||
+    stdinEvent?.input ||
+    stdinEvent?.tool_input?.command ||
+    null;
+
+  return {
+    ts: nowIso,
+    slot,
+    runId,
+    provider,
+    eventType,
+    cwd,
+    command,
+    durationMs: Number.isFinite(durationMs) ? durationMs : stdinDurationMs,
+    payload: stdinEvent || null,
+  };
 }
 
 const nowIso = new Date().toISOString();
@@ -46,35 +87,8 @@ const slot = process.env.ATC_SLOT || 'unknown';
 const runId = process.env.ATC_RUN_ID || 'unknown';
 const provider = process.env.ATC_PROVIDER || stdinEvent?.provider || null;
 const currentDir = process.env.ATC_CURRENT_DIR || '';
-const fallbackEvents = currentDir ? path.join(currentDir, 'events.jsonl') : path.join(process.cwd(), 'dashboard', 'runtime', 'unassigned-events.jsonl');
-const eventsFile = process.env.ATC_EVENTS_FILE || fallbackEvents;
-const metaFile = process.env.ATC_META_FILE || (currentDir ? path.join(currentDir, 'meta.json') : path.join(process.cwd(), 'dashboard', 'runtime', 'meta-fallback.json'));
-const derivedFile = process.env.ATC_DERIVED_FILE || (currentDir ? path.join(currentDir, 'derived.json') : path.join(process.cwd(), 'dashboard', 'runtime', 'derived-fallback.json'));
-
-const rawDuration = process.env.ATC_EVENT_DURATION_MS;
-const durationMs = rawDuration === undefined || rawDuration === '' ? null : Number(rawDuration);
-const stdinDurationMs = Number.isFinite(Number(stdinEvent?.durationMs)) ? Number(stdinEvent.durationMs) : null;
-
-const eventType = process.env.ATC_EVENT_TYPE || stdinEvent?.hook_event_name || stdinEvent?.hookEventName || stdinEvent?.eventType || stdinEvent?.type || 'unknown';
-const cwd = process.env.ATC_EVENT_CWD || stdinEvent?.cwd || stdinEvent?.workdir || null;
-const command =
-  process.env.ATC_EVENT_COMMAND ||
-  stdinEvent?.command ||
-  stdinEvent?.input ||
-  stdinEvent?.tool_input?.command ||
-  null;
-
-const event = {
-  ts: nowIso,
-  slot,
-  runId,
-  provider,
-  eventType,
-  cwd,
-  command,
-  durationMs: Number.isFinite(durationMs) ? durationMs : stdinDurationMs,
-  payload: stdinEvent || null,
-};
+const { eventsFile, metaFile, derivedFile } = resolveOutputFiles(currentDir);
+const event = buildEvent({ nowIso, stdinEvent, slot, runId, provider });
 
 ensureParent(eventsFile);
 fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n', 'utf8');
