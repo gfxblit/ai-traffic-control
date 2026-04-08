@@ -1568,22 +1568,22 @@ function renderPage() {
     }
     .provider {
       display: grid;
-      grid-template-columns: 72px 1fr;
+      grid-template-columns: 78px 1fr;
       align-items: stretch;
       gap: 10px;
       min-width: 0;
       padding-right: 34px;
     }
     .provider-logo {
-      width: 72px;
-      height: 72px;
+      width: 78px;
+      height: 78px;
       border-radius: 10px;
       border: 1px solid #d7e4ff;
       background: #ffffff;
       box-sizing: border-box;
       display: block;
       object-fit: contain;
-      padding: 11px;
+      padding: 12px;
     }
     .provider-name-wrap { min-width: 0; }
     .provider-name {
@@ -1659,7 +1659,7 @@ function renderPage() {
     .usage-row.expanded .usage-details { display: block; }
     .usage-row.expanded .provider {
       align-items: start;
-      grid-template-columns: 72px 1fr;
+      grid-template-columns: 78px 1fr;
     }
     .usage-row.expanded .provider-name {
       display: block;
@@ -1779,6 +1779,17 @@ function renderPage() {
       border: 0;
       object-fit: cover;
       object-position: center top;
+    }
+    .session-persona-hat {
+      position: absolute;
+      top: -4px;
+      left: -8px;
+      width: 54px;
+      height: 36px;
+      transform: rotate(-32deg);
+      z-index: 2;
+      filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.32));
+      pointer-events: none;
     }
     .session-media::after {
       content: "";
@@ -1952,6 +1963,15 @@ function renderPage() {
       letter-spacing: 0.35px;
       margin-bottom: 7px;
     }
+    .intent-top-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 10px;
+      align-items: stretch;
+    }
+    .intent-top-row .intent-block {
+      margin-top: 0;
+    }
     .provider-carousel {
       display: grid;
       grid-template-columns: 34px 1fr 34px;
@@ -2013,30 +2033,31 @@ function renderPage() {
       border-radius: 14px;
       overflow: hidden;
       background: linear-gradient(145deg, #162347 0%, #0e1831 100%);
-      min-height: 156px;
+      min-height: 126px;
       position: relative;
+      height: 100%;
     }
     .intent-scientist-image {
       display: block;
       width: 100%;
       height: 100%;
-      min-height: 156px;
+      min-height: 126px;
       object-fit: cover;
       object-position: center top;
     }
     .intent-scientist-hat {
       position: absolute;
-      top: 8px;
-      left: 50%;
-      width: 84px;
-      height: 56px;
-      transform: translateX(-50%);
+      top: -5px;
+      left: -7px;
+      width: 56px;
+      height: 40px;
+      transform: rotate(-32deg);
       z-index: 2;
       filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.35));
       pointer-events: none;
     }
     .intent-scientist-fallback {
-      min-height: 156px;
+      min-height: 126px;
       display: grid;
       place-items: center;
       font-size: 30px;
@@ -2062,6 +2083,7 @@ function renderPage() {
       gap: 8px;
     }
     .template-btn {
+      width: 100%;
       border: 1px solid #3a4f82;
       border-radius: 11px;
       background: #111b35;
@@ -2135,6 +2157,10 @@ function renderPage() {
       gap: 8px;
       align-items: center;
     }
+    #persona-select-card {
+      min-width: 0;
+      width: 100%;
+    }
     .persona-nav {
       border: 1px solid #4d69a8;
       border-radius: 9px;
@@ -2148,6 +2174,10 @@ function renderPage() {
       border-color: var(--persona-accent, #5f87e0);
       box-shadow: 0 0 0 1px #ffffff18 inset;
       background: #15254a;
+    }
+    .persona-select-card {
+      width: 100%;
+      display: block;
     }
     .persona-note {
       margin-top: 8px;
@@ -2292,34 +2322,35 @@ function renderPage() {
       body { padding: 12px; }
       .title { font-size: 22px; }
       .title .decor { font-size: 18px; }
-      .provider { grid-template-columns: 46px 1fr; }
+      .provider { grid-template-columns: 50px 1fr; }
       .provider-logo {
-        width: 46px;
-        height: 46px;
+        width: 50px;
+        height: 50px;
         padding: 7px;
       }
       .provider-select-card { min-height: 116px; }
-      .provider-select-head { grid-template-columns: 54px 1fr; }
+      .provider-select-head { grid-template-columns: 56px 1fr; }
       .provider-select-logo {
-        width: 54px;
-        height: 54px;
+        width: 56px;
+        height: 56px;
         padding: 6px;
       }
       .provider-select-logo { box-sizing: border-box; display: block; }
-      .usage-row.expanded .provider { grid-template-columns: 46px 1fr; }
+      .usage-row.expanded .provider { grid-template-columns: 50px 1fr; }
       .mini { grid-template-columns: 62px 34px minmax(0, 1.35fr) minmax(84px, 0.9fr); gap: 5px; }
       .mini-label, .mini-pct, .mini-reset { font-size: 10px; }
       .windows { grid-template-columns: 1fr; }
       .session { grid-template-columns: 96px minmax(0, 1fr); }
       .session-body { padding: 10px; }
       .name { font-size: 16px; }
-      .template-grid { grid-template-columns: 1fr; }
+      .intent-top-row { grid-template-columns: 84px minmax(0, 1fr); gap: 8px; }
       .intent-scientist,
       .intent-scientist-image,
-      .intent-scientist-fallback { min-height: 112px; }
-      .intent-scientist-hat { width: 72px; height: 48px; top: 6px; }
+      .intent-scientist-fallback { min-height: 104px; }
+      .intent-scientist-hat { width: 44px; height: 30px; top: -4px; left: -6px; }
+      .template-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
       .persona-carousel,
-      .provider-carousel { grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 6px; }
+      .provider-carousel { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 6px; }
     }
   </style>
 </head>
@@ -2344,16 +2375,18 @@ function renderPage() {
         <div class="modal-title" id="intent-title">Start Session</div>
         <button type="button" class="modal-close" id="intent-close" aria-label="Close intent modal">&times;</button>
       </div>
-      <div class="intent-block">
-        <div class="intent-label">Scientist</div>
-        <div id="intent-scientist"></div>
-      </div>
-      <div class="intent-block">
-        <div class="intent-label">Provider</div>
-        <div class="provider-carousel">
-          <button type="button" class="carousel-nav" id="provider-prev" aria-label="Previous provider">&#8592;</button>
-          <div id="provider-select"></div>
-          <button type="button" class="carousel-nav" id="provider-next" aria-label="Next provider">&#8594;</button>
+      <div class="intent-top-row">
+        <div class="intent-block">
+          <div class="intent-label">Scientist</div>
+          <div id="intent-scientist"></div>
+        </div>
+        <div class="intent-block">
+          <div class="intent-label">Provider</div>
+          <div class="provider-carousel">
+            <button type="button" class="carousel-nav" id="provider-prev" aria-label="Previous provider">&#8592;</button>
+            <div id="provider-select"></div>
+            <button type="button" class="carousel-nav" id="provider-next" aria-label="Next provider">&#8594;</button>
+          </div>
         </div>
       </div>
       <div class="intent-block">
@@ -2542,7 +2575,7 @@ function renderPage() {
             '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>' +
           '</button>' +
           '<div class="provider">' +
-            '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" width="72" height="72" />' +
+            '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" width="78" height="78" />' +
             '<div class="provider-name-wrap"><div class="provider-name">' + esc(title) + ' <span class="provider-plan-inline">(Unavailable)</span></div><div class="provider-plan-block">Unavailable</div></div>' +
           '</div>' +
           '<div class="usage-error">' + esc(payload?.error || 'Usage unavailable') + '</div>' +
@@ -2555,7 +2588,7 @@ function renderPage() {
           '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>' +
         '</button>' +
         '<div class="provider">' +
-          '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" width="72" height="72" />' +
+          '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" width="78" height="78" />' +
           '<div class="provider-name-wrap">' +
             '<div class="provider-name">' + esc(title) + ' <span class="provider-plan-inline">(' + esc(plan) + ')</span></div>' +
             '<div class="provider-plan-block">' + esc(plan) + '</div>' +
@@ -2633,15 +2666,16 @@ function renderPage() {
       return String(intentState.name || 'Scientist').trim() || 'Scientist';
     }
 
-    function personaHatMarkup(persona) {
+    function personaHatMarkup(persona, variant = 'intent') {
       if (!persona || persona.id === PERSONA_NONE) return '';
       if (persona.hatStyle !== 'rainbow' && !persona.hatColor) return '';
       const fill = persona.hatStyle === 'rainbow' ? 'url(#persona-rainbow-hat)' : esc(persona.hatColor || persona.accent || '#dbe8ff');
       const stroke = persona.hatStyle === 'rainbow' ? '#18213a' : '#0b1324';
+      const klass = variant === 'session' ? 'session-persona-hat' : 'intent-scientist-hat';
       const body = persona.hatStyle === 'rainbow'
         ? '<defs><linearGradient id="persona-rainbow-hat" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#f43f5e"/><stop offset="16%" stop-color="#fb923c"/><stop offset="32%" stop-color="#facc15"/><stop offset="48%" stop-color="#4ade80"/><stop offset="64%" stop-color="#22d3ee"/><stop offset="80%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#c084fc"/></linearGradient></defs>'
         : '';
-      return '<svg class="intent-scientist-hat" viewBox="0 0 120 80" aria-hidden="true" focusable="false">' +
+      return '<svg class="' + klass + '" viewBox="0 0 120 80" aria-hidden="true" focusable="false">' +
         body +
         '<path d="M16 54h88c5.5 0 10 4.5 10 10v3H6v-3c0-5.5 4.5-10 10-10z" fill="' + fill + '" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
         '<path d="M34 15h52c8 0 14 6 14 14v25H20V29c0-8 6-14 14-14z" fill="' + fill + '" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
@@ -2654,7 +2688,7 @@ function renderPage() {
       const alt = String(intentState.pictureAlt || selectedScientistName() + ' portrait').trim();
       const name = selectedScientistName();
       const persona = personaForId(intentState.personaId);
-      const hat = personaHatMarkup(persona);
+      const hat = personaHatMarkup(persona, 'intent');
       if (src) {
         return '<div class="intent-scientist">' +
           '<img class="intent-scientist-image" src="' + esc(src) + '" alt="' + esc(alt) + '" loading="lazy" decoding="async" />' +
@@ -2830,7 +2864,7 @@ function renderPage() {
       if (!usage || !usage.ok) {
         return '<div class="provider-select-card" id="provider-select-card">' +
           '<div class="provider-select-head">' +
-            '<img class="provider-select-logo" src="' + esc(logo) + '" alt="' + esc(provider.title) + ' logo" loading="lazy" width="46" height="46" />' +
+            '<img class="provider-select-logo" src="' + esc(logo) + '" alt="' + esc(provider.title) + ' logo" loading="lazy" width="56" height="56" />' +
             '<div><div class="provider-select-name">' + esc(provider.title) + '</div><div class="provider-select-plan">Usage unavailable</div></div>' +
           '</div>' +
           '<div class="provider-select-windows">' + miniWindow(null) + miniWindow(null) + '</div>' +
@@ -2839,7 +2873,7 @@ function renderPage() {
       const plan = compactPlan(usage.plan || 'connected');
       return '<div class="provider-select-card" id="provider-select-card">' +
         '<div class="provider-select-head">' +
-          '<img class="provider-select-logo" src="' + esc(logo) + '" alt="' + esc(provider.title) + ' logo" loading="lazy" width="46" height="46" />' +
+          '<img class="provider-select-logo" src="' + esc(logo) + '" alt="' + esc(provider.title) + ' logo" loading="lazy" width="56" height="56" />' +
           '<div><div class="provider-select-name">' + esc(provider.title) + '</div><div class="provider-select-plan">' + esc(plan) + '</div></div>' +
         '</div>' +
         '<div class="provider-select-windows">' +
@@ -3220,6 +3254,7 @@ function renderPage() {
       const actionClass = isSpawning ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
       const badgeClass = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
       const badgeText = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
+      const hat = personaHatMarkup(personaForId(personaId), 'session');
 
       return '<article class="session tap ' + (isSpawning ? 'spawning' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (isActive ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
         '<button type="button" class="kill" ' + (isActive ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
@@ -3227,6 +3262,7 @@ function renderPage() {
           (pictureSrc
             ? '<img class="session-picture" src="' + esc(pictureSrc) + '" alt="' + esc(pictureAlt) + '" loading="lazy" decoding="async" />'
             : '<div class="session-media-fallback" aria-hidden="true">' + esc(String(s.name || '?').trim().slice(0, 1).toUpperCase()) + '</div>') +
+          hat +
         '</div>' +
         '<div class="session-body">' +
           '<div class="head">' +
