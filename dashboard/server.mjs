@@ -1372,6 +1372,7 @@ async function getMergedSessions() {
         backendActive,
         startedAgo: displayActiveSince ? durationSince(displayActiveSince) : 'n/a',
         lastInteractionAgo: displayLastInteraction ? ago(displayLastInteraction) : 'n/a',
+        lastInteractionMs: displayLastInteraction ? Math.max(0, Date.now() - new Date(displayLastInteraction).getTime()) : null,
       };
     })
   );
@@ -1894,6 +1895,33 @@ function renderPage() {
       from { transform: translateX(-100%); }
       to { transform: translateX(100%); }
     }
+    /* Card tints per session state */
+    .session.state-active {
+      border-color: #0f8e68aa;
+      background: linear-gradient(130deg, #0a3f3166 0%, #0d2e2440 40%, #111831 100%);
+      box-shadow: 0 0 18px #0f8e6830 inset, 0 0 0 1px #0f8e6822 inset;
+    }
+    .session.state-active .session-media {
+      background: radial-gradient(circle at 35% 20%, #0f3d30, #0d152a 72%);
+    }
+    .session.state-idle {
+      border-color: #72570faa;
+      background: linear-gradient(130deg, #3f300c55 0%, #2a200a40 40%, #111831 100%);
+      box-shadow: 0 0 18px #72570f30 inset, 0 0 0 1px #72570f22 inset;
+    }
+    .session.state-idle .session-media {
+      background: radial-gradient(circle at 35% 20%, #3a2c10, #0d152a 72%);
+    }
+    .session.state-unborn {
+      border-color: #333;
+      background: linear-gradient(130deg, #1a1a1a 0%, #141414 40%, #111 100%);
+      opacity: 0.6;
+    }
+    .session.state-unborn .session-picture,
+    .session.state-unborn .session-media-fallback {
+      opacity: 0.45;
+    }
+    .color-unborn { color: #666; }
     .head {
       display: flex;
       align-items: flex-start;
@@ -1930,6 +1958,7 @@ function renderPage() {
     .badge.active { border-color: #0f8e68; background: #0a3f31; color: #8ef6d3; }
     .badge.starting { border-color: #4a4d78; background: #20274a; color: #d5ddff; }
     .badge.idle { border-color: #72570f; background: #3f300c; color: #ffd98a; }
+    .badge.unborn { border-color: #444; background: #222; color: #888; }
     .persona-badge {
       display: inline-flex;
       align-items: center;
@@ -3392,22 +3421,27 @@ function renderPage() {
     }
 
     function sessionCard(s) {
-      const isActive = s.status === 'active' && s.backendActive;
+      const hasBackend = s.status === 'active' && s.backendActive;
       const isSpawning = spawning.has(s.name);
+      const FIVE_MIN = 5 * 60 * 1000;
+      const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN;
+      const isIdle = hasBackend && !isActive;
+      const isUnborn = !hasBackend && !isSpawning;
+      const sessionState = isSpawning ? 'starting' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
       const hasAgent = !!(s.telemetry && s.telemetry.agentType && s.telemetry.agentType !== 'none');
       const personaId = normalizePersonaId(s.personaId);
       const pictureSrc = sessionPictureSrc(s);
       const pictureAlt = s.name + ' portrait';
       const rawTaskTitle = String(s.taskTitle || '').trim();
       const taskTitle = rawTaskTitle && !/^shell:\s*/i.test(rawTaskTitle) ? rawTaskTitle : 'Not set';
-      const actionText = isSpawning ? 'Starting terminal…' : (isActive ? 'Tap to connect' : 'Tap to start');
-      const actionClass = isSpawning ? 'color-starting' : (isActive ? 'color-active' : 'color-idle');
-      const badgeClass = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
-      const badgeText = isSpawning ? 'starting' : (isActive ? 'active' : 'idle');
+      const actionText = isSpawning ? 'Starting terminal…' : (hasBackend ? 'Tap to connect' : 'Tap to start');
+      const actionClass = isSpawning ? 'color-starting' : (isActive ? 'color-active' : (isIdle ? 'color-idle' : 'color-unborn'));
+      const badgeClass = sessionState;
+      const badgeText = sessionState;
       const hat = personaHatMarkup(personaForId(personaId), 'session');
 
-      return '<article class="session tap ' + (isSpawning ? 'spawning' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (isActive ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
-        '<button type="button" class="kill" ' + (isActive ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
+      return '<article class="session tap state-' + esc(sessionState) + (isSpawning ? ' spawning' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (hasBackend ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
+        '<button type="button" class="kill" ' + (hasBackend ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
         '<div class="session-media">' +
           (pictureSrc
             ? '<img class="session-picture" src="' + esc(pictureSrc) + '" alt="' + esc(pictureAlt) + '" loading="lazy" decoding="async" />'
@@ -3432,7 +3466,7 @@ function renderPage() {
           (hasAgent
             ? '<div class="line muted">Context window: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.contextWindowPct))) ? (Math.round(Number(s.telemetry.contextWindowPct)) + '%') : 'N/A') + '</div>'
             : '') +
-          '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + esc(s.lastInteractionAgo || 'n/a') + '</div>' +
+          '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + (isIdle ? '<strong>' : '') + esc(s.lastInteractionAgo || 'n/a') + (isIdle ? '</strong>' : '') + '</div>' +
           (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
           '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
         '</div>' +
@@ -3661,7 +3695,9 @@ if (process.env.DASHBOARD_TEST_IMPORT !== '1') {
 }
 
 export {
+  ago,
   buildProviderLaunchCommand,
+  durationSince,
   fetchCodexbarUsage,
   normalizePersonaId,
   normalizePersonaForTemplate,
