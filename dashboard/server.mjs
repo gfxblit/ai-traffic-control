@@ -1992,6 +1992,26 @@ function renderPage() {
     }
     .kill[disabled] { opacity: 0.35; cursor: not-allowed; }
 
+    .provider-tag {
+      position: absolute;
+      top: 10px;
+      right: 50px;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid #d7e4ff;
+      background: #ffffff;
+      display: grid;
+      place-items: center;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .provider-tag img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
     .action-hint {
       margin-top: 10px;
       font-size: 12px;
@@ -3435,7 +3455,12 @@ function renderPage() {
       const badgeText = sessionState;
       const hat = personaHatMarkup(personaForId(personaId), 'session');
 
+      const providerKey = s.provider || 'codex';
+      const providerLogoMap = { codex: '/assets/logos/openai.svg?v=2', claude: '/assets/logos/anthropic.svg?v=2', gemini: '/assets/logos/google.svg?v=2' };
+      const providerLogoSrc = providerLogoMap[providerKey] || providerLogoMap.codex;
+
       return '<article class="session tap state-' + esc(sessionState) + (isSpawning ? ' spawning' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (hasBackend ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
+        (!isUnborn ? '<span class="provider-tag"><img src="' + esc(providerLogoSrc) + '" alt="' + esc(providerKey) + '" width="20" height="20" /></span>' : '') +
         '<button type="button" class="kill" ' + (hasBackend ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
         '<div class="session-media">' +
           (pictureSrc
