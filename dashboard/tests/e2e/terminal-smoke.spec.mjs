@@ -104,6 +104,7 @@ test.beforeAll(async () => {
       SESSIONS_RUNTIME_DIR: runtimeDir,
       DEFAULT_SESSION_WORKDIR: workdir,
       ENABLE_SHELL_HOOKS: '1',
+      ENABLE_TMUX_BACKEND: '0',
       TELEMETRY_INGEST_MS: '500',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

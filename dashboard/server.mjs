@@ -17,6 +17,8 @@ const RUN_DIR = process.env.SESSIONS_RUN_DIR || path.join(__dirname, 'run');
 const RUNTIME_DIR = process.env.SESSIONS_RUNTIME_DIR || path.join(__dirname, 'runtime');
 const TTYD_BIN = process.env.TTYD_BIN || '/opt/homebrew/bin/ttyd';
 const SHELL_BIN = process.env.SHELL_BIN || '/bin/zsh';
+const TMUX_BIN = process.env.TMUX_BIN || 'tmux';
+const ENABLE_TMUX_BACKEND = process.env.ENABLE_TMUX_BACKEND !== '0';
 const DEFAULT_WORKDIR = process.env.DEFAULT_SESSION_WORKDIR || '/Users/nihal/Code/MobileDev';
 const SHELL_HOOK_WRITER = process.env.SHELL_HOOK_WRITER || path.join(__dirname, 'scripts', 'shell-hook-writer.mjs');
 const ENABLE_SHELL_HOOKS = process.env.ENABLE_SHELL_HOOKS !== '0';
@@ -149,7 +151,6 @@ async function fetchCodexbarUsage(provider, source = 'auto') {
       ok: true,
       provider: (provider || '').toLowerCase(),
       source: root.source || source || 'auto',
-      accountEmail: usage?.accountEmail || dashboard?.signedInEmail || null,
       plan: usage?.loginMethod || dashboard?.accountPlan || null,
       primary: parseWindow(primary),
       secondary: parseWindow(secondary),
@@ -348,6 +349,22 @@ function logFileForBackend(backendPort) {
   return path.join(RUN_DIR, `ttyd-${backendPort}.log`);
 }
 
+function tmuxSessionNameForSlot(slotName) {
+  const clean = String(slotName || 'slot')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return clean || 'slot';
+}
+
+async function commandExists(cmd) {
+  if (!cmd) return false;
+  if (cmd.includes('/')) return fsSync.existsSync(cmd);
+  const result = await runCommand('sh', ['-lc', `command -v ${cmd} >/dev/null 2>&1`], 3000);
+  return !!result.ok;
+}
+
 function isPidAlive(pid) {
   if (!Number.isFinite(pid) || pid <= 0) return false;
   try {
@@ -429,6 +446,38 @@ async function writeJsonAtomic(filePath, payload) {
   const tmp = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(payload, null, 2) + '\n', 'utf8');
   await fs.rename(tmp, filePath);
+}
+
+async function emitSlotEvent(hookEnv, eventType, cwd = '', commandText = '', durationMs = '') {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [SHELL_HOOK_WRITER], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      env: {
+        ...process.env,
+        ...hookEnv,
+        ATC_EVENT_TYPE: eventType || '',
+        ATC_EVENT_CWD: cwd || '',
+        ATC_EVENT_COMMAND: commandText || '',
+        ATC_EVENT_DURATION_MS: durationMs || '',
+      },
+    });
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // no-op
+      }
+      resolve();
+    }, 1200);
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 function shSingle(str) {
@@ -765,12 +814,23 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
   const backendTaken = await checkPortOpen(slot.backendPort);
   if (backendTaken) throw new Error(`backend port ${slot.backendPort} is already in use`);
 
+  if (ENABLE_TMUX_BACKEND) {
+    const tmuxFound = await commandExists(TMUX_BIN);
+    if (!tmuxFound) throw new Error(`tmux not found at ${TMUX_BIN}`);
+  }
+
+  const slotWorkdir = sessionState.workdir || DEFAULT_WORKDIR;
+  const tmuxSessionName = tmuxSessionNameForSlot(slot.name);
+  const ttydCommandArgs = ENABLE_TMUX_BACKEND
+    ? [TMUX_BIN, 'new-session', '-A', '-s', tmuxSessionName, '-c', slotWorkdir, `${SHELL_BIN} -il`]
+    : [SHELL_BIN, '-il'];
+
   const out = fsSync.openSync(logFileForBackend(slot.backendPort), 'a');
   const child = spawn(
     TTYD_BIN,
-    ['-W', '-i', '127.0.0.1', '-p', String(slot.backendPort), '-t', 'scrollback=100000', '-t', 'disableResizeOverlay=true', '--', SHELL_BIN, '-il'],
+    ['-W', '-i', '127.0.0.1', '-p', String(slot.backendPort), '-t', 'scrollback=100000', '-t', 'disableResizeOverlay=true', '--', ...ttydCommandArgs],
     {
-      cwd: sessionState.workdir || DEFAULT_WORKDIR,
+      cwd: slotWorkdir,
       detached: true,
       stdio: ['ignore', out, out],
       env: {
@@ -778,6 +838,7 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
         ...runtimeEnv,
         ...(ENABLE_SHELL_HOOKS && shellConfig?.zdotdir ? { ZDOTDIR: shellConfig.zdotdir, ATC_ZDOTDIR: shellConfig.zdotdir } : {}),
         DASH_SLOT_NAME: slot.name,
+        ATC_TMUX_SESSION: tmuxSessionName,
       },
     }
   );
@@ -889,6 +950,7 @@ async function spawnSlotByName(name) {
   const runId = makeRunId();
   await rotateSlotCurrent(slot.name, st.runId);
   const { paths, hookEnv } = await ensureSlotRuntime(slot.name, runId, st.workdir);
+  await emitSlotEvent(hookEnv, 'shell_start', st.workdir || DEFAULT_WORKDIR, '', '');
   const pid = await spawnSessionBackend(slot, st, { ...hookEnv }, { zdotdir: paths.zdotdir });
   const backendReady = await waitForTtydReady(slot.backendPort, 10000);
   if (!backendReady) {
@@ -1049,10 +1111,33 @@ function renderPage() {
       border-radius: 14px;
       background: linear-gradient(150deg, #18274a 0%, #101a33 100%);
       padding: 10px 12px;
+      position: relative;
+    }
+    .usage-toggle {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid #355086;
+      background: #132247;
+      color: #dbe8ff;
+      cursor: pointer;
       display: grid;
-      grid-template-columns: minmax(170px, 210px) 1fr;
-      gap: 12px;
-      align-items: center;
+      place-items: center;
+      transition: transform 120ms ease;
+    }
+    .usage-row.expanded .usage-toggle { transform: rotate(180deg); }
+    .usage-toggle svg {
+      width: 14px;
+      height: 14px;
+      display: block;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .provider {
       display: grid;
@@ -1060,13 +1145,14 @@ function renderPage() {
       align-items: center;
       gap: 10px;
       min-width: 0;
+      padding-right: 34px;
     }
     .provider-logo {
       width: 34px;
       height: 34px;
       border-radius: 10px;
-      border: 1px solid #314369;
-      background: #0f172d;
+      border: 1px solid #d7e4ff;
+      background: #ffffff;
       object-fit: contain;
       padding: 6px;
     }
@@ -1074,15 +1160,61 @@ function renderPage() {
       font-size: 16px;
       font-weight: 700;
       line-height: 1.1;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
     }
-    .provider-meta {
-      margin-top: 2px;
-      color: #b5c8ee;
+    .provider-plan-inline {
+      color: #afc3ec;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .provider-mini {
+      margin-top: 5px;
+      display: grid;
+      gap: 4px;
+    }
+    .mini {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 3fr) minmax(120px, 1fr);
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .mini-label {
+      color: #acc2ec;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .mini-bar {
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: #0e1730;
+      border: 1px solid #2e4169;
+      overflow: hidden;
+    }
+    .mini-bar-fill {
+      height: 100%;
+      width: 0%;
+      transition: width 180ms ease-out;
+      background: linear-gradient(90deg, #1bb172 0%, #f0b526 72%, #d7424d 100%);
+    }
+    .mini-meta {
+      color: #cfdbf7;
       font-size: 11px;
       white-space: nowrap;
+      text-align: right;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .usage-details {
+      margin-top: 8px;
+      display: none;
+    }
+    .usage-row.expanded .usage-details { display: block; }
     .windows {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1236,9 +1368,10 @@ function renderPage() {
       body { padding: 12px; }
       .title { font-size: 22px; }
       .title .decor { font-size: 18px; }
-      .usage-row { grid-template-columns: 1fr; }
       .provider { grid-template-columns: 30px 1fr; }
       .provider-logo { width: 30px; height: 30px; padding: 5px; }
+      .mini { grid-template-columns: 24px minmax(0, 2fr) minmax(92px, 1fr); gap: 6px; }
+      .windows { grid-template-columns: 1fr; }
       .session-inner { padding-right: 46px; }
       .name { font-size: 16px; }
     }
@@ -1277,6 +1410,7 @@ function renderPage() {
       claude: '/assets/logos/anthropic.svg',
       gemini: '/assets/logos/google.svg',
     };
+    const usageExpanded = new Set();
 
     function clampPct(value) {
       const pct = Number(value ?? 0);
@@ -1288,6 +1422,36 @@ function renderPage() {
       if (pct >= 85) return '#f96a73';
       if (pct >= 70) return '#f0bf44';
       return '#38cc89';
+    }
+
+    function compactPlan(plan) {
+      const cleaned = String(plan || '').trim();
+      if (!cleaned) return '';
+      const lower = cleaned.toLowerCase();
+      if (lower.includes('plus')) return 'Plus';
+      if (lower.includes('pro')) return 'Pro';
+      if (lower.includes('paid')) return 'Paid';
+      return cleaned;
+    }
+
+    function compactWindowLabel(label) {
+      const lower = String(label || '').toLowerCase();
+      if (lower.includes('5-hour') || lower.includes('5h')) return '5h';
+      if (lower.includes('weekly') || lower === 'w') return 'W';
+      if (lower.includes('primary')) return 'P';
+      if (lower.includes('secondary')) return 'S';
+      return String(label || 'W').slice(0, 2);
+    }
+
+    function miniWindow(windowInfo) {
+      if (!windowInfo) return '<div class="mini"><div class="mini-label">n/a</div><div class="mini-meta">No data</div></div>';
+      const pct = clampPct(windowInfo.usedPercent);
+      const shortLabel = compactWindowLabel(windowInfo.label || 'window');
+      return '<div class="mini">' +
+        '<div class="mini-label">' + esc(shortLabel) + '</div>' +
+        '<div class="mini-bar"><div class="mini-bar-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="mini-meta">' + esc(Math.round(pct) + '%  ' + (windowInfo.resetIn || 'n/a')) + '</div>' +
+      '</div>';
     }
 
     function windowCard(windowInfo) {
@@ -1305,30 +1469,57 @@ function renderPage() {
 
     function providerUsageRow(providerKey, title, payload) {
       const logo = PROVIDER_LOGOS[providerKey] || '';
+      const isExpanded = usageExpanded.has(providerKey);
       if (!payload || !payload.ok) {
         return '<article class="usage-row error">' +
+          '<button class="usage-toggle" data-toggle-provider="' + esc(providerKey) + '" aria-expanded="false" aria-label="Toggle ' + esc(title) + ' details">' +
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>' +
+          '</button>' +
           '<div class="provider">' +
             '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" />' +
-            '<div><div class="provider-name">' + esc(title) + '</div></div>' +
+            '<div><div class="provider-name">' + esc(title) + ' <span class="provider-plan-inline">(Unavailable)</span></div></div>' +
           '</div>' +
           '<div class="usage-error">' + esc(payload?.error || 'Usage unavailable') + '</div>' +
         '</article>';
       }
 
-      const meta = [payload.plan, payload.accountEmail].filter(Boolean).join(' • ');
-      return '<article class="usage-row">' +
+      const plan = compactPlan(payload.plan || 'connected');
+      return '<article class="usage-row ' + (isExpanded ? 'expanded' : '') + '" data-provider="' + esc(providerKey) + '">' +
+        '<button class="usage-toggle" data-toggle-provider="' + esc(providerKey) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" aria-label="Toggle ' + esc(title) + ' details">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>' +
+        '</button>' +
         '<div class="provider">' +
           '<img class="provider-logo" src="' + esc(logo) + '" alt="' + esc(title) + ' logo" loading="lazy" />' +
           '<div>' +
-            '<div class="provider-name">' + esc(title) + '</div>' +
-            '<div class="provider-meta">' + esc(meta || 'connected') + '</div>' +
+            '<div class="provider-name">' + esc(title) + ' <span class="provider-plan-inline">(' + esc(plan) + ')</span></div>' +
+            '<div class="provider-mini">' +
+              miniWindow(payload.primary) +
+              miniWindow(payload.secondary) +
+            '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="windows">' +
-          windowCard(payload.primary) +
-          windowCard(payload.secondary) +
+        '<div class="usage-details">' +
+          '<div class="windows">' +
+            windowCard(payload.primary) +
+            windowCard(payload.secondary) +
+          '</div>' +
         '</div>' +
       '</article>';
+    }
+
+    function bindUsageInteractions() {
+      const toggles = document.querySelectorAll('[data-toggle-provider]');
+      for (const btn of toggles) {
+        btn.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const provider = btn.getAttribute('data-toggle-provider');
+          if (!provider) return;
+          if (usageExpanded.has(provider)) usageExpanded.delete(provider);
+          else usageExpanded.add(provider);
+          refresh().catch(function () {});
+        });
+      }
     }
 
     function compact(v, max) {
@@ -1493,6 +1684,7 @@ function renderPage() {
         providerUsageRow('gemini', 'Gemini', usage.gemini),
       ];
       usageGrid.innerHTML = rows.join('');
+      bindUsageInteractions();
 
       const sessionsEl = document.getElementById('sessions');
       sessionsEl.innerHTML = sessions.map(sessionCard).join('') || '<div class="line muted">No sessions configured.</div>';
