@@ -35,7 +35,7 @@ This view shows:
 - Hot-dial agents at the top of the fleet panel.
 - Active scientist cards with current task/workdir context.
 
-[![Dashboard overview](https://i.ibb.co/DPg9JJLH/Screenshot-20260409-111523-Firefox.jpg)](https://ibb.co/WNpkhhs4)
+[![Dashboard overview](https://drive.usercontent.google.com/download?id=179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a&export=view)](https://drive.google.com/file/d/179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a/view?usp=drivesdk)
 
 GIF walkthrough: coming soon.
 
@@ -46,7 +46,7 @@ This view shows:
 - Command output stream and prompt loop inside the managed terminal surface.
 - How AI Traffic Control lets you operate terminal sessions without opening a separate terminal app.
 
-[![Browser terminal view](https://i.ibb.co/Mkk11Pnv/Screenshot-20260408-000908-Firefox.jpg)](https://ibb.co/chh882JB)
+[![Browser terminal view](https://drive.usercontent.google.com/download?id=1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us&export=view)](https://drive.google.com/file/d/1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us/view?usp=drivesdk)
 
 GIF walkthrough: coming soon.
 
@@ -57,7 +57,7 @@ This view shows:
 - Template and persona controls.
 - Working directory and recent-directory shortcuts before launch.
 
-[![Intent modal](https://i.ibb.co/JwBB28Ct/Screenshot-20260409-112037-Firefox.jpg)](https://ibb.co/q3yy9hxj)
+[![Intent modal](https://drive.usercontent.google.com/download?id=1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs&export=view)](https://drive.google.com/file/d/1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs/view?usp=drivesdk)
 
 GIF walkthrough: coming soon.
 
@@ -68,7 +68,7 @@ This view shows:
 - Fast triage context per scientist (task, workdir, turns, and recency).
 - How to identify sessions that need intervention vs. sessions ready to start.
 
-[![Scientist fleet states](https://i.ibb.co/6RX5KJQt/Screenshot-20260409-112204-Firefox.jpg)](https://ibb.co/0js30V59)
+[![Scientist fleet states](https://drive.usercontent.google.com/download?id=1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA&export=view)](https://drive.google.com/file/d/1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA/view?usp=drivesdk)
 
 GIF walkthrough: coming soon.
 
