@@ -25,6 +25,7 @@ Project status: active and evolving (expect configuration and workflow changes b
 - **Hot-dial custom agents:** Lightweight assistants (for example Calendar Manager and Second Brain) with simplified launch flow.
 - **Scientist fleet states:** Four scientists visible in different lifecycle modes (`active`, `idle`, `unborn`) with persona hats/badges where applicable.
 - **Intent modal:** Structured session start flow with provider/template/persona controls for scientist launches.
+- **AI session title summarizer:** Gemini-based title updates from recent transcript context, written directly to session state.
 
 ## Visual Tour
 
@@ -134,6 +135,23 @@ curl -sS http://127.0.0.1:1111/api/sessions | jq '{count: (.sessions|length), ha
 ```
 
 ## Common Workflows
+
+### Configure AI session title summarizer
+
+The dashboard can auto-update each slot title (`taskTitle`) based on the latest CLI conversation direction.
+
+Main knobs:
+- `ATC_SUMMARY_TRIGGER_INTERVAL` (default `1`; run summarizer every prompt)
+- `ATC_SUMMARIZER_CMD` (default `gemini`)
+- `ATC_SUMMARIZER_MODEL` (default `gemini-3.1-flash-lite-preview`)
+- `ATC_SUMMARY_TRANSCRIPT_LINES` (default `10`)
+- `ATC_SUMMARY_TIMEOUT_MS` (default `180000`)
+- `ATC_NO_SUMMARIZER=1` to disable
+
+Implementation reference:
+- `dashboard/scripts/shell-hook-writer.mjs`
+- `dashboard/scripts/summarize-title.mjs`
+- `dashboard/runtime/logs/summarizer.log`
 
 ### Run dashboard tests
 

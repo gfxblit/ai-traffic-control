@@ -2,38 +2,52 @@
 /**
  * summarize-title.mjs — AI-powered session title summarizer
  *
- * Reads the last N exchanges from a slot's events.jsonl, builds a summarization
- * prompt, pipes it to a CLI agent (default: gemini), and writes the result to title.txt.
+ * Reads the last N exchanges from a slot's events.jsonl, builds a transcript,
+ * and invokes Gemini CLI to update the session's taskTitle directly in the
+ * sessions-state.json file.
  *
  * Invoked by shell-hook-writer.mjs every TRIGGER_INTERVAL user prompts.
  *
  * Configuration (env vars):
  *   ATC_SUMMARY_EXCHANGE_COUNT  — number of recent exchanges to include (default: 10)
- *   ATC_SUMMARY_TRIGGER_INTERVAL — not used here; controls hook-side trigger cadence
- *   ATC_SUMMARIZER_CMD          — CLI command to run (default: "gemini")
+ *   ATC_SUMMARY_TRANSCRIPT_LINES — number of transcript lines to pass to Gemini (default: 10)
+ *   ATC_SUMMARIZER_MODEL        — Gemini model id for title summarization (default: gemini-3.1-flash-lite-preview)
  *   ATC_EVENTS_FILE             — path to the slot's events.jsonl
- *   ATC_CURRENT_DIR             — path to the slot's current/ directory (title.txt lives here)
- *   ATC_SUMMARY_TIMEOUT_MS      — max time to wait for the summarizer (default: 30000)
+ *   ATC_SLOT                    — scientist name (e.g. "Feynman")
+ *   ATC_STATE_FILE              — path to sessions-state.json
+ *   ATC_SUMMARY_TIMEOUT_MS      — max time to wait for Gemini (default: 180000)
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 // ── Configuration ──────────────────────────────────────────────
 const EXCHANGE_COUNT = Number(process.env.ATC_SUMMARY_EXCHANGE_COUNT || 10);
-const SUMMARIZER_CMD = process.env.ATC_SUMMARIZER_CMD || 'gemini';
-const TIMEOUT_MS = Number(process.env.ATC_SUMMARY_TIMEOUT_MS || 30000);
+const TRANSCRIPT_LINE_COUNT = Number(process.env.ATC_SUMMARY_TRANSCRIPT_LINES || 10);
+const TIMEOUT_MS = Number(process.env.ATC_SUMMARY_TIMEOUT_MS || 180000);
 const EVENTS_FILE = process.env.ATC_EVENTS_FILE || '';
-const CURRENT_DIR = process.env.ATC_CURRENT_DIR || '';
+const SLOT_NAME = process.env.ATC_SLOT || '';
+const STATE_FILE = process.env.ATC_STATE_FILE || '';
+const SUMMARIZER_CMD = process.env.ATC_SUMMARIZER_CMD || 'gemini';
+const SUMMARIZER_MODEL = String(process.env.ATC_SUMMARIZER_MODEL || 'gemini-3.1-flash-lite-preview').trim();
 
-if (!EVENTS_FILE || !CURRENT_DIR) {
-  process.exit(0); // nothing to do
+// ── Logging ────────────────────────────────────────────────────
+const LOG_DIR = path.join(path.dirname(STATE_FILE || '.'), '..', 'runtime', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'summarizer.log');
+
+function log(msg) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    const ts = new Date().toISOString();
+    fs.appendFileSync(LOG_FILE, `[${ts}] [${SLOT_NAME}] ${msg}\n`);
+  } catch { /* best-effort */ }
 }
 
-const TITLE_FILE = path.join(CURRENT_DIR, 'title.txt');
-const META_FILE = path.join(CURRENT_DIR, 'meta.json');
+if (!EVENTS_FILE || !SLOT_NAME || !STATE_FILE) {
+  log(`abort: missing env — EVENTS_FILE=${EVENTS_FILE} SLOT=${SLOT_NAME} STATE_FILE=${STATE_FILE}`);
+  process.exit(0);
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -49,22 +63,7 @@ function readJsonLines(filePath) {
   }
 }
 
-function readJson(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function writeJsonAtomic(filePath, data) {
-  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, filePath);
-}
-
 function extractExchanges(events, count) {
-  // Collect user prompts (UserPromptSubmit) and assistant replies (Stop)
   const userPrompts = [];
   const assistantReplies = [];
 
@@ -77,12 +76,10 @@ function extractExchanges(events, count) {
     }
   }
 
-  // Take the last N user prompts and pair with their corresponding replies
   const recentPrompts = userPrompts.slice(-count);
   const exchanges = [];
 
   for (const prompt of recentPrompts) {
-    // Find the first assistant reply after this prompt
     const reply = assistantReplies.find((r) => r.ts >= prompt.ts);
     exchanges.push({
       user: truncate(prompt.text, 500),
@@ -99,89 +96,121 @@ function truncate(text, maxLen) {
   return clean.length <= maxLen ? clean : clean.slice(0, maxLen) + '…';
 }
 
-function buildPrompt(exchanges) {
-  let conversation = '';
-  for (const ex of exchanges) {
-    conversation += `User: ${ex.user}\n`;
-    if (ex.assistant) {
-      conversation += `Assistant: ${ex.assistant}\n`;
-    }
-    conversation += '\n';
+function extractLatestTranscriptPath(events) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const candidate = events[i]?.payload?.transcript_path;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
   }
+  return '';
+}
 
-  return (
-    'Below is a transcript of recent interactions in a coding session. ' +
-    'Generate a short title (max 60 characters) that summarizes what the user is currently working on. ' +
-    'Output ONLY the title text, nothing else — no quotes, no explanation, no prefix.\n\n' +
-    conversation
-  );
+function readLastLines(filePath, lineCount) {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+    return lines.slice(-lineCount).join('\n').trim();
+  } catch {
+    return '';
+  }
+}
+
+function writeTempTranscript(content) {
+  const baseDir = path.join(path.dirname(STATE_FILE), '.tmp-summarizer');
+  fs.mkdirSync(baseDir, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(baseDir, 'run-'));
+  const file = path.join(dir, `last-${TRANSCRIPT_LINE_COUNT}-lines.txt`);
+  fs.writeFileSync(file, content + '\n', 'utf8');
+  return { dir, file };
 }
 
 // ── Main ───────────────────────────────────────────────────────
+
+log('started');
 
 const events = readJsonLines(EVENTS_FILE);
 const exchanges = extractExchanges(events, EXCHANGE_COUNT);
 
 if (exchanges.length === 0) {
+  log('abort: no exchanges found');
   process.exit(0);
 }
 
-// Write the exchanges to a temp file that the CLI agent can read with its tools.
-// The instruction to summarize is passed as the short CLI argument; the transcript
-// lives on disk so the agent can read it naturally without shell-escaping issues.
-const tmpDir = os.tmpdir();
-const transcriptFile = path.join(tmpDir, `atc-transcript-${process.pid}-${Date.now()}.md`);
-
-let transcriptMd = '';
+let transcript = '';
 for (const ex of exchanges) {
-  transcriptMd += `**User:** ${ex.user}\n\n`;
+  transcript += `User: ${ex.user}\n`;
   if (ex.assistant) {
-    transcriptMd += `**Assistant:** ${ex.assistant}\n\n`;
+    transcript += `Assistant: ${ex.assistant}\n`;
   }
-  transcriptMd += '---\n\n';
+  transcript += '\n';
 }
-fs.writeFileSync(transcriptFile, transcriptMd, 'utf8');
+
+const transcriptPath = extractLatestTranscriptPath(events);
+const transcriptTail = transcriptPath ? readLastLines(transcriptPath, TRANSCRIPT_LINE_COUNT) : '';
+const transcriptSource = transcriptTail ? 'native_transcript' : 'events_fallback';
+const transcriptContent = transcriptTail || transcript;
+const tempTranscript = writeTempTranscript(transcriptContent);
+
+log(`extracted ${exchanges.length} exchanges; source=${transcriptSource}; invoking gemini`);
 
 const instruction =
-  `Read the file ${transcriptFile} — it contains recent exchanges from a coding session. ` +
-  `Generate a short title (max 60 characters) that summarizes what the user is working on. ` +
-  `Output ONLY the title text, nothing else.`;
+  `You are a helper that updates a session title in a JSON config file. ` +
+  `Read the file ${tempTranscript.file} — it contains the most recent transcript lines ` +
+  `for the "${SLOT_NAME}" coding session.\n\n` +
+  `Based on this transcript, generate a short title (max 60 characters) that summarizes what the user is currently working on.\n\n` +
+  `Then update the file ${STATE_FILE} — it is a JSON file with a "sessions" object. ` +
+  `Find the key "${SLOT_NAME}" inside "sessions" and set its "taskTitle" field to your generated title. ` +
+  `Do not change any other fields. Write the file back with the updated title.\n\n` +
+  `After updating the file, output ONLY the title you chose (nothing else).`;
 
-const child = spawn(SUMMARIZER_CMD, [instruction], {
-  stdio: ['ignore', 'pipe', 'ignore'],
+const summarizeArgs = [];
+if (SUMMARIZER_MODEL) summarizeArgs.push('-m', SUMMARIZER_MODEL);
+summarizeArgs.push('-p', instruction, '--yolo', '--output-format', 'text');
+
+const child = spawn(SUMMARIZER_CMD, summarizeArgs, {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  cwd: path.dirname(STATE_FILE),
 });
 
-let output = '';
-child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+let stdout = '';
+let stderr = '';
+let closed = false;
+child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
 const timer = setTimeout(() => {
+  log('timeout — killing gemini');
   child.kill('SIGTERM');
+
+  setTimeout(() => {
+    if (!closed) child.kill('SIGKILL');
+  }, 4000);
 }, TIMEOUT_MS);
 
-child.on('close', () => {
+child.on('error', (err) => {
+  clearTimeout(timer);
+  log(`spawn error: ${err.message}`);
+});
+
+child.on('close', (code) => {
+  closed = true;
   clearTimeout(timer);
 
-  // Clean up temp transcript file
-  try { fs.unlinkSync(transcriptFile); } catch {}
+  const firstLine = stdout.replace(/\s+/g, ' ').trim().split('\n')[0]?.trim() || '';
+  log(`gemini exited code=${code} stdout_len=${stdout.length} stderr_len=${stderr.length} first_line="${firstLine}"`);
 
-  const title = output
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split('\n')[0]     // first line only
-    .replace(/^["']|["']$/g, '') // strip surrounding quotes
-    .trim()
-    .slice(0, 80);
-
-  if (!title) {
-    process.exit(0);
+  if (stderr.trim()) {
+    // Log first few lines of stderr for debugging
+    const stderrPreview = stderr.trim().split('\n').slice(0, 5).join(' | ');
+    log(`gemini stderr: ${stderrPreview}`);
   }
 
-  // Write to title.txt
-  fs.writeFileSync(TITLE_FILE, title + '\n', 'utf8');
+  if (code !== 0) {
+    log(`gemini failed with exit code ${code}`);
+  }
 
-  // Mark in meta that this was an AI-generated title
-  const meta = readJson(META_FILE);
-  meta.aiTitleAt = new Date().toISOString();
-  meta.aiTitle = title;
-  writeJsonAtomic(META_FILE, meta);
+  try {
+    fs.unlinkSync(tempTranscript.file);
+    fs.rmdirSync(tempTranscript.dir);
+  } catch {
+    // best-effort cleanup
+  }
 });

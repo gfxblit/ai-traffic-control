@@ -74,6 +74,33 @@ Derived metrics are computed in the dashboard process:
 
 Per-slot context usage is shown only when hooks provide an explicit percent field; otherwise the UI displays `N/A`.
 
+## AI Title Summarizer (Gemini)
+
+Scientist and hot-dial session titles are automatically summarized from recent CLI transcript context and written back to:
+- `dashboard/state/sessions-state.json` (`sessions.<slot>.taskTitle`)
+
+Current trigger behavior:
+- Runs on every `UserPromptSubmit` by default (`ATC_SUMMARY_TRIGGER_INTERVAL=1`)
+
+Transcript source behavior:
+- Preferred: `payload.transcript_path` from hook events, tailing the last `ATC_SUMMARY_TRANSCRIPT_LINES` lines (default `10`)
+- Fallback: reconstruct recent exchanges from `events.jsonl` (`ATC_SUMMARY_EXCHANGE_COUNT`, default `10`)
+
+Core files:
+- Trigger + counter: `dashboard/scripts/shell-hook-writer.mjs`
+- Summarizer worker: `dashboard/scripts/summarize-title.mjs`
+- Logs: `dashboard/runtime/logs/summarizer.log`
+
+Model and command configuration:
+- `ATC_SUMMARIZER_CMD` (default: `gemini`)
+- `ATC_SUMMARIZER_MODEL` (default: `gemini-3.1-flash-lite-preview`)
+- `ATC_SUMMARY_TIMEOUT_MS` (default: `180000`)
+- `ATC_NO_SUMMARIZER=1` disables summarization
+
+Why this model default:
+- `gemini-3.1-flash-lite-preview` is listed as Gemini's most cost-efficient model and is a strong fit for short title synthesis.
+- If you prefer a stable non-preview fallback, set `ATC_SUMMARIZER_MODEL=gemini-2.5-flash-lite`.
+
 ## Provider launch + permissions mode
 
 When an idle scientist is started from the dashboard, the backend:
