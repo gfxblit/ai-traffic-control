@@ -112,6 +112,7 @@ const PERSONA_ALIASES = new Map([
   ['lucky_dip_explorer', 'slot_machine_bandit'],
   ['lucky-dip-explorer', 'slot_machine_bandit'],
 ]);
+const SECOND_BRAIN_DIR = path.join(HOME_DIRECTORY, 'Documents', 'SecondBrain');
 const HOT_DIAL_AGENTS = [
   {
     id: 'calendar_manager',
@@ -120,6 +121,8 @@ const HOT_DIAL_AGENTS = [
     icon: 'calendar',
     emoji: '📅',
     enabled: true,
+    promptFile: 'calendar-manager.md',
+    workdir: SECOND_BRAIN_DIR,
   },
   {
     id: 'second_brain',
@@ -128,6 +131,8 @@ const HOT_DIAL_AGENTS = [
     icon: 'brain',
     emoji: '🧠',
     enabled: true,
+    promptFile: null,
+    workdir: SECOND_BRAIN_DIR,
   },
   {
     id: 'placeholder_1',
@@ -867,7 +872,7 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
 
 async function launchProviderInTmuxSlot(sessionName, provider, sessionState) {
   if (!ENABLE_PROVIDER_AUTO_LAUNCH) return;
-  const promptFilePath = personaPromptPath(sessionState?.personaId);
+  const promptFilePath = sessionState?.agentPromptFile || personaPromptPath(sessionState?.personaId);
   const command = buildProviderLaunchCommand(provider, sessionState?.workdir || DEFAULT_WORKDIR, promptFilePath);
   if (!command) return;
 
@@ -1397,9 +1402,11 @@ async function getMergedSessions() {
             ? derived.title
             : st.taskTitle,
         agentType:
-          st.status === 'active' && st.runId && derived && derived.runId === st.runId && typeof derived.agentType === 'string'
-            ? derived.agentType
-            : st.agentType,
+          HOT_DIAL_BY_ID.has(st.agentType)
+            ? st.agentType
+            : (st.status === 'active' && st.runId && derived && derived.runId === st.runId && typeof derived.agentType === 'string'
+                ? derived.agentType
+                : st.agentType),
         workdir: displayWorkdir,
         activeSince: displayActiveSince || null,
         telemetry: st.status === 'active' && st.runId && derived && derived.runId === st.runId ? derived : null,
@@ -1428,9 +1435,12 @@ async function spawnSlotByName(name, options = {}) {
   const personaId = normalizePersonaId(options.personaId, PERSONA_NONE);
   const taskTitle = typeof options.taskTitle === 'string' && options.taskTitle.trim() ? options.taskTitle.trim() : null;
   const agentType = typeof options.agentType === 'string' && options.agentType.trim() ? options.agentType.trim() : null;
+  const agentPromptFile = typeof options.agentPromptFile === 'string' && options.agentPromptFile.trim() ? options.agentPromptFile.trim() : null;
   const requestedWorkdir = typeof options.workdir === 'string' ? options.workdir : '';
   const effectiveWorkdirInput = requestedWorkdir.trim() || (templateProvided ? HOME_DIRECTORY : (st.workdir || DEFAULT_WORKDIR));
-  const workdir = await resolveWorkdirForSpawn(templateId, effectiveWorkdirInput);
+  const workdir = agentType && requestedWorkdir.trim()
+    ? path.resolve(requestedWorkdir.trim())
+    : await resolveWorkdirForSpawn(templateId, effectiveWorkdirInput);
 
   const alreadyUp = await checkPortOpen(slot.backendPort);
   if (alreadyUp) {
@@ -1447,6 +1457,7 @@ async function spawnSlotByName(name, options = {}) {
   st.personaId = personaId;
   if (taskTitle) st.taskTitle = taskTitle;
   if (agentType) st.agentType = agentType;
+  st.agentPromptFile = agentPromptFile;
   st.workdir = workdir;
   if (templateId === TEMPLATE_CONTINUE_WORK) appendRecentWorkdir(state, workdir);
   await rotateSlotCurrent(slot.name, st.runId);
@@ -1495,13 +1506,16 @@ async function launchHotDialAgent(dialId, provider) {
 
   if (!selectedSlot) throw new Error('no idle scientist slots available');
 
+  const agentPromptFile = agent.promptFile ? path.join(PERSONAS_DIR, agent.promptFile) : null;
+
   await spawnSlotByName(selectedSlot.name, {
     provider: normalizeProvider(provider),
     templateId: TEMPLATE_NEW_BRAINSTORM,
     personaId: PERSONA_NONE,
-    workdir: HOME_DIRECTORY,
+    workdir: agent.workdir || HOME_DIRECTORY,
     taskTitle: agent.title,
     agentType: agent.id,
+    agentPromptFile,
   });
 
   return { slotName: selectedSlot.name, agentId: agent.id };
@@ -2166,6 +2180,26 @@ function renderPage() {
       width: 20px;
       height: 20px;
       object-fit: contain;
+    }
+
+    .agent-type-tag {
+      position: absolute;
+      top: 10px;
+      right: 90px;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid #d7e4ff;
+      background: #ffffff;
+      display: grid;
+      place-items: center;
+      z-index: 2;
+      pointer-events: none;
+      color: #334155;
+    }
+    .agent-type-tag svg {
+      width: 20px;
+      height: 20px;
     }
 
     .action-hint {
@@ -3846,8 +3880,11 @@ function renderPage() {
       const providerKey = s.provider || 'codex';
       const providerLogoMap = { codex: '/assets/logos/openai.svg?v=2', claude: '/assets/logos/anthropic.svg?v=2', gemini: '/assets/logos/google.svg?v=2' };
       const providerLogoSrc = providerLogoMap[providerKey] || providerLogoMap.codex;
+      const agentIconKind = (s.agentType === 'calendar_manager') ? 'calendar' : (s.agentType === 'second_brain') ? 'brain' : null;
+      const agentTypeTag = agentIconKind && !isUnborn ? '<span class="agent-type-tag">' + dialIconSvg(agentIconKind, 'agent-type-icon') + '</span>' : '';
 
       return '<article class="session tap state-' + esc(sessionState) + (isSpawning ? ' spawning' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (hasBackend ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '">' +
+        agentTypeTag +
         (!isUnborn ? '<span class="provider-tag"><img src="' + esc(providerLogoSrc) + '" alt="' + esc(providerKey) + '" width="20" height="20" /></span>' : '') +
         '<button type="button" class="kill" ' + (hasBackend ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
         '<div class="session-media">' +
