@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DASHBOARD_TEST_IMPORT = '1';
-const { ago, durationSince } = await import('../../server.mjs');
+const { ago, durationSince, selectLastInteractionAtFromOutput } = await import('../../server.mjs');
 
 // ---------------------------------------------------------------------------
 // Helper: replicates the three-state logic from the client-side sessionCard()
@@ -195,4 +195,26 @@ test('tmux pane parser falls back to active pane when no atc window', () => {
   const result = parseTmuxPaneOutput(stdout);
   assert.equal(result.cwd, '/home');
   assert.equal(result.lastInteractionAt, new Date(ts * 1000).toISOString());
+});
+
+test('last interaction selection ignores newer non-output events and keeps latest output-like event', () => {
+  const oldOutputTs = new Date(Date.now() - 35 * 60_000).toISOString();
+  const recentPromptTs = new Date(Date.now() - 60_000).toISOString();
+  const events = [
+    { eventType: 'Stop', ts: oldOutputTs },
+    { eventType: 'UserPromptSubmit', ts: recentPromptTs },
+  ];
+  const chosen = selectLastInteractionAtFromOutput(events, { lastInteractionAt: oldOutputTs }, { lastInteractionAt: null });
+  assert.equal(chosen, oldOutputTs);
+});
+
+test('last interaction selection falls back to output-like events when tmux signal is missing', () => {
+  const oldOutputTs = new Date(Date.now() - 12 * 60_000).toISOString();
+  const recentPromptTs = new Date(Date.now() - 30_000).toISOString();
+  const events = [
+    { eventType: 'precmd', ts: oldOutputTs },
+    { eventType: 'UserPromptSubmit', ts: recentPromptTs },
+  ];
+  const chosen = selectLastInteractionAtFromOutput(events, { lastInteractionAt: null }, { lastInteractionAt: null });
+  assert.equal(chosen, oldOutputTs);
 });

@@ -5,6 +5,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,7 +33,6 @@ const USER_HISTORY_FILE = process.env.ATC_USER_HISTORY_FILE || path.join(process
 const REFRESH_MS = 8000;
 const USAGE_TTL_MS = 10000;
 const TELEMETRY_INGEST_MS = Number(process.env.TELEMETRY_INGEST_MS || 2000);
-const TITLE_POLL_MS = Number(process.env.TITLE_POLL_MS || 300000);
 const SLOT_RUN_RETENTION = Number(process.env.SLOT_RUN_RETENTION || 3);
 const RECENT_WORKDIR_LIMIT = 5;
 const TEMPLATE_NEW_BRAINSTORM = 'new_brainstorm';
@@ -739,7 +739,6 @@ function slotRuntimePaths(slotName) {
     metaFile: path.join(currentDir, 'meta.json'),
     eventsFile: path.join(currentDir, 'events.jsonl'),
     derivedFile: path.join(currentDir, 'derived.json'),
-    titleFile: path.join(currentDir, 'title.txt'),
     zdotdir: path.join(currentDir, '.zsh_atc'),
     zshrcFile: path.join(currentDir, '.zsh_atc', '.zshrc'),
   };
@@ -919,6 +918,29 @@ async function readTmuxSlotPaneState(slotName) {
   };
 }
 
+function hashPaneContent(content) {
+  return createHash('sha1').update(String(content || ''), 'utf8').digest('hex');
+}
+
+async function readTmuxSlotPaneFingerprint(slotName) {
+  if (!ENABLE_TMUX_BACKEND) return null;
+  const sessionName = tmuxSessionNameForSlot(slotName);
+  const target = `${sessionName}:${TMUX_SLOT_WINDOW}.0`;
+  const result = await runCommand(
+    TMUX_BIN,
+    // Capture visible pane text (joined wraps), enough lines for stable change detection.
+    ['capture-pane', '-p', '-J', '-t', target, '-S', '-160'],
+    3000
+  );
+  if (!result.ok) return null;
+  const normalized = (result.stdout || '')
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, ''))
+    .join('\n')
+    .trimEnd();
+  return hashPaneContent(normalized);
+}
+
 function buildAtcZshrc(env) {
   return [
     '#!/usr/bin/env zsh',
@@ -1047,7 +1069,6 @@ async function ensureSlotRuntime(slotName, runId, workdir, sessionState = {}) {
   await writeJsonAtomic(paths.metaFile, meta);
   await writeJsonAtomic(paths.derivedFile, derived);
   await fs.writeFile(paths.eventsFile, '', 'utf8');
-  await fs.writeFile(paths.titleFile, '', 'utf8');
 
   const hookEnv = {
     ATC_SLOT: slotName,
@@ -1115,18 +1136,6 @@ async function rotateSlotCurrent(slotName, previousRunId = null) {
   }
 }
 
-function generateTitleFromEvents(events) {
-  const recent = events.slice(-10);
-  const lastPrompt = [...recent].reverse().find((e) => e.eventType === 'UserPromptSubmit' && e.payload?.prompt);
-  if (lastPrompt?.payload?.prompt) return compactText(lastPrompt.payload.prompt, 72);
-
-  const lastCommand = [...recent].reverse().find((e) => typeof e.command === 'string' && e.command.trim());
-  if (lastCommand?.command) return `Shell: ${compactText(lastCommand.command, 64)}`;
-
-  const provider = [...recent].reverse().find((e) => e.provider)?.provider;
-  if (provider) return `${String(provider).toUpperCase()} session`;
-  return '';
-}
 
 function extractContextWindowPct(events) {
   for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -1152,9 +1161,23 @@ function extractContextWindowPct(events) {
   return null;
 }
 
+function selectLastInteractionAtFromOutput(events, tmuxPaneState, stateRecord) {
+  // Prefer events that usually occur after terminal output is rendered,
+  // and avoid prompt-submission hooks that can be user/viewer noise.
+  const outputLikeEvents = new Set(['precmd', 'PostToolUse', 'Stop']);
+  const lastOutputLike = [...events].reverse().find((e) => outputLikeEvents.has(e.eventType));
+  if (lastOutputLike?.ts) return lastOutputLike.ts;
+
+  const tmuxTs = tmuxPaneState?.lastInteractionAt;
+  if (typeof tmuxTs === 'string' && tmuxTs.trim()) return tmuxTs;
+
+  return stateRecord?.lastInteractionAt || null;
+}
+
 async function recomputeDerivedForSlot(slot, stateRecord) {
   if (!stateRecord?.runId) return;
   const runtime = slotRuntimePaths(slot.name);
+  const prevDerived = await readJsonSafe(runtime.derivedFile, null);
   const events = await readEvents(runtime.eventsFile, stateRecord.runId);
   if (events.length === 0) return;
 
@@ -1166,23 +1189,21 @@ async function recomputeDerivedForSlot(slot, stateRecord) {
   const lastStop = [...events].reverse().find((e) => e.eventType === 'Stop');
   const turnCount = events.filter((e) => e.eventType === 'UserPromptSubmit').length;
   const contextWindowPct = extractContextWindowPct(events);
-  const tmuxPaneState = await readTmuxSlotPaneState(slot.name);
-  const titlePath = runtime.titleFile;
+  const [tmuxPaneState, paneFingerprint] = await Promise.all([
+    readTmuxSlotPaneState(slot.name),
+    readTmuxSlotPaneFingerprint(slot.name),
+  ]);
 
-  let title = '';
-  try {
-    title = (await fs.readFile(titlePath, 'utf8')).trim();
-  } catch {
-    title = '';
-  }
-
-  // title.txt is written by the AI summarizer (summarize-title.mjs).
-  // When empty, the dashboard falls back to st.taskTitle ("Fresh X session").
-
-  const eventLastTs = last.ts ? new Date(last.ts).getTime() : NaN;
-  const tmuxLastTs = tmuxPaneState?.lastInteractionAt ? new Date(tmuxPaneState.lastInteractionAt).getTime() : NaN;
-  const interactionAt =
-    Number.isFinite(tmuxLastTs) && (!Number.isFinite(eventLastTs) || tmuxLastTs > eventLastTs) ? tmuxPaneState.lastInteractionAt : last.ts;
+  // A pane fingerprint change means visible terminal output changed.
+  const paneOutputAt = paneFingerprint && paneFingerprint !== prevDerived?.paneFingerprint
+    ? new Date().toISOString()
+    : (typeof prevDerived?.paneOutputAt === 'string' ? prevDerived.paneOutputAt : null);
+  const eventOutputAt = selectLastInteractionAtFromOutput(events, tmuxPaneState, stateRecord);
+  const paneOutputMs = paneOutputAt ? new Date(paneOutputAt).getTime() : NaN;
+  const eventOutputMs = eventOutputAt ? new Date(eventOutputAt).getTime() : NaN;
+  const interactionAt = Number.isFinite(paneOutputMs) && (!Number.isFinite(eventOutputMs) || paneOutputMs > eventOutputMs)
+    ? paneOutputAt
+    : eventOutputAt;
 
   const derived = {
     slot: slot.name,
@@ -1201,8 +1222,9 @@ async function recomputeDerivedForSlot(slot, stateRecord) {
     lastAssistantStopAt: lastStop?.ts || null,
     turnCount,
     agentType: lastProvider || 'none',
-    title,
     contextWindowPct,
+    paneFingerprint,
+    paneOutputAt,
   };
 
   await writeJsonAtomic(runtime.derivedFile, derived);
@@ -1219,18 +1241,6 @@ async function ingestTelemetry() {
   );
 }
 
-async function refreshTitles() {
-  // Titles are now written exclusively by the AI summarizer (summarize-title.mjs).
-  // This function just recomputes derived state so new titles are picked up.
-  const [cfg, state] = await Promise.all([readSessionsConfig(), loadState()]);
-  await Promise.all(
-    cfg.map(async (slot) => {
-      const st = state.sessions[slot.name];
-      if (!st || st.status !== 'active' || !st.runId) return;
-      await recomputeDerivedForSlot(slot, st);
-    })
-  );
-}
 
 async function killPid(pid) {
   if (!Number.isFinite(pid) || pid <= 0) return;
@@ -1391,10 +1401,7 @@ async function getMergedSessions() {
       return {
         ...slot,
         ...st,
-        taskTitle:
-          st.status === 'active' && st.runId && derived && derived.runId === st.runId && typeof derived.title === 'string' && derived.title
-            ? derived.title
-            : st.taskTitle,
+        taskTitle: st.taskTitle,
         agentType:
           HOT_DIAL_BY_ID.has(st.agentType)
             ? st.agentType
@@ -4135,7 +4142,6 @@ const server = http.createServer(async (req, res) => {
 async function startDashboardServer() {
   await loadState();
   await ingestTelemetry().catch(() => {});
-  await refreshTitles().catch(() => {});
   refreshUsageSummaryInBackground().catch(() => {});
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`dashboard listening on http://0.0.0.0:${PORT}`);
@@ -4145,9 +4151,8 @@ async function startDashboardServer() {
     ingestTelemetry().catch(() => {});
   }, TELEMETRY_INGEST_MS);
 
-  setInterval(() => {
-    refreshTitles().catch(() => {});
-  }, TITLE_POLL_MS);
+  // Title updates are handled by Gemini writing to sessions-state.json directly;
+  // the dashboard picks them up on the next ingestTelemetry cycle.
 }
 
 if (process.env.DASHBOARD_TEST_IMPORT !== '1') {
@@ -4164,4 +4169,5 @@ export {
   personaConfig,
   personaIdsForTemplate,
   PERSONA_CONFIGS,
+  selectLastInteractionAtFromOutput,
 };
