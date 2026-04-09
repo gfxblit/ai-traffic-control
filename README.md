@@ -35,9 +35,11 @@ This view shows:
 - Hot-dial agents at the top of the fleet panel.
 - Active scientist cards with current task/workdir context.
 
-<a href="https://drive.google.com/file/d/179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a/view?usp=drivesdk">
-  <img src="https://drive.usercontent.google.com/download?id=179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a&export=view" alt="Dashboard overview" height="520" />
-</a>
+<p align="center">
+  <a href="https://drive.google.com/file/d/179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a/view?usp=drivesdk">
+    <img src="https://drive.usercontent.google.com/download?id=179UyavAANO4LGiaEdBtOUlsnJBh_FJ1a&export=view" alt="Dashboard overview" height="780" />
+  </a>
+</p>
 
 GIF walkthrough: coming soon.
 
@@ -48,9 +50,11 @@ This view shows:
 - Command output stream and prompt loop inside the managed terminal surface.
 - How AI Traffic Control lets you operate terminal sessions without opening a separate terminal app.
 
-<a href="https://drive.google.com/file/d/1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us/view?usp=drivesdk">
-  <img src="https://drive.usercontent.google.com/download?id=1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us&export=view" alt="Browser terminal view" height="520" />
-</a>
+<p align="center">
+  <a href="https://drive.google.com/file/d/1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us/view?usp=drivesdk">
+    <img src="https://drive.usercontent.google.com/download?id=1O7tuYj-3whmwcA4xieL-wykoFh0dZ6Us&export=view" alt="Browser terminal view" height="780" />
+  </a>
+</p>
 
 GIF walkthrough: coming soon.
 
@@ -61,9 +65,11 @@ This view shows:
 - Template and persona controls.
 - Working directory and recent-directory shortcuts before launch.
 
-<a href="https://drive.google.com/file/d/1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs/view?usp=drivesdk">
-  <img src="https://drive.usercontent.google.com/download?id=1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs&export=view" alt="Intent modal" height="520" />
-</a>
+<p align="center">
+  <a href="https://drive.google.com/file/d/1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs/view?usp=drivesdk">
+    <img src="https://drive.usercontent.google.com/download?id=1Hqo1obKcj0XxRYWk16M37dtXOuwwYZVs&export=view" alt="Intent modal" height="780" />
+  </a>
+</p>
 
 GIF walkthrough: coming soon.
 
@@ -74,9 +80,11 @@ This view shows:
 - Fast triage context per scientist (task, workdir, turns, and recency).
 - How to identify sessions that need intervention vs. sessions ready to start.
 
-<a href="https://drive.google.com/file/d/1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA/view?usp=drivesdk">
-  <img src="https://drive.usercontent.google.com/download?id=1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA&export=view" alt="Scientist fleet states" height="520" />
-</a>
+<p align="center">
+  <a href="https://drive.google.com/file/d/1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA/view?usp=drivesdk">
+    <img src="https://drive.usercontent.google.com/download?id=1SPfvSTXpadh0AeBNuQk6TA6mZ963JMDA&export=view" alt="Scientist fleet states" height="780" />
+  </a>
+</p>
 
 GIF walkthrough: coming soon.
 
