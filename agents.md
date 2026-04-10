@@ -2,6 +2,8 @@
 
 This file defines required post-change steps for this repo so agents do not rely on user reminders.
 
+Privacy note: documentation must not include real names or real email addresses in examples.
+
 ## 1) Dashboard app (`dashboard/`)
 
 ### 1.1 If `dashboard/server.mjs` changes
@@ -89,3 +91,12 @@ Before handing off code changes:
 2. Run relevant test suite(s) for changed area.
 3. Verify key runtime endpoint/listener for that area.
 4. Report exact commands run and verification results in final update.
+
+## 4) Calendar manager integration notes
+
+When using `~/Code/CalendarAutomation`:
+
+1. Use `create_event(...)` / `update_event(...)` wrappers for attendee writes.
+2. Attendee names (for example, `Contact Person`) resolve via `.local/contacts.yaml`.
+3. Attendees must be written as GCSA `Attendee` objects internally; avoid assigning raw strings directly on fetched event objects.
+4. Ensure Google send-updates behavior is enabled on writes so attendee email notifications are sent.
