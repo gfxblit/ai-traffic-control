@@ -161,3 +161,32 @@ node -e "
 " "$CLAUDE_SETTINGS" "$HOOK_FORWARDER" "$TOOL_MATCHER"
 
 echo "merged claude hooks into $CLAUDE_SETTINGS"
+
+# ── Gemini CLI global hooks ────────────────────────────────────
+# Install hooks into the global ~/.gemini/settings.json.
+GEMINI_DIR="$HOME/.gemini"
+GEMINI_SETTINGS="$GEMINI_DIR/settings.json"
+
+mkdir -p "$GEMINI_DIR"
+
+# Merge hooks into existing settings
+node -e "
+  const fs = require('fs');
+  const settingsPath = process.argv[1];
+  const forwarder = process.argv[2];
+  const matcher = process.argv[3];
+  const cmd = 'ATC_PROVIDER=gemini node \"' + forwarder + '\"';
+  const hooks = {
+    SessionStart: [{ hooks: [{ type: 'command', command: cmd }] }],
+    BeforeAgent: [{ hooks: [{ type: 'command', command: cmd }] }],
+    BeforeTool: [{ matcher, hooks: [{ type: 'command', command: cmd }] }],
+    AfterTool: [{ matcher, hooks: [{ type: 'command', command: cmd }] }],
+    AfterAgent: [{ hooks: [{ type: 'command', command: cmd }] }],
+  };
+  let existing = {};
+  try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+  existing.hooks = hooks;
+  fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2) + '\n');
+" "$GEMINI_SETTINGS" "$HOOK_FORWARDER" "$TOOL_MATCHER"
+
+echo "merged gemini hooks into $GEMINI_SETTINGS"

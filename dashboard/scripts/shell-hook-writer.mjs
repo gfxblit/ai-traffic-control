@@ -71,6 +71,7 @@ function buildEvent({ nowIso, stdinEvent, slot, runId, provider }) {
     process.env.ATC_EVENT_COMMAND ||
     stdinEvent?.command ||
     stdinEvent?.input ||
+    stdinEvent?.prompt ||
     stdinEvent?.tool_input?.command ||
     null;
 

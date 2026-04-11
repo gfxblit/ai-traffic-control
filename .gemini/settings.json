@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "node \"$GEMINI_PROJECT_DIR/dashboard/scripts/codex-hook-forwarder.mjs\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "command": "node \"$GEMINI_PROJECT_DIR/dashboard/scripts/codex-hook-forwarder.mjs\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "command": "node \"$GEMINI_PROJECT_DIR/dashboard/scripts/codex-hook-forwarder.mjs\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command|read_file|write_file|replace|MultiEdit|glob|grep|ls|WebFetch|WebSearch|Task|TodoWrite|NotebookEdit",
+        "hooks": [
+          {
+            "command": "node \"$GEMINI_PROJECT_DIR/dashboard/scripts/codex-hook-forwarder.mjs\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "run_shell_command|read_file|write_file|replace|MultiEdit|glob|grep|ls|WebFetch|WebSearch|Task|TodoWrite|NotebookEdit",
+        "hooks": [
+          {
+            "command": "node \"$GEMINI_PROJECT_DIR/dashboard/scripts/codex-hook-forwarder.mjs\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
