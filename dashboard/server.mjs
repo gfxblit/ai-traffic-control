@@ -1110,7 +1110,12 @@ async function ensureSlotRuntime(slotName, runId, workdir, sessionState = {}) {
     ATC_TEMPLATE_ID: templateId,
     ATC_PERSONA_ID: personaId,
     GEMINI_PROJECT_DIR: REPO_ROOT,
-    GEMINI_CLI_SYSTEM_SETTINGS_PATH: path.join(REPO_ROOT, '.gemini', 'settings.json'),
+    GEMINI_CLI_SYSTEM_SETTINGS_PATH: (() => {
+      const scientistName = slotName.toLowerCase();
+      const specificHook = path.join(REPO_ROOT, 'scientist-hooks', `${scientistName}.json`);
+      if (fsSync.existsSync(specificHook)) return specificHook;
+      return path.join(REPO_ROOT, 'scientist-hooks', 'common.json');
+    })(),
   };
 
   await fs.writeFile(paths.zshrcFile, buildAtcZshrc(hookEnv), { mode: 0o644 });

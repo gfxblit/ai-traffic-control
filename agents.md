@@ -36,7 +36,7 @@ Important behavior:
 - `start-ttyd-sessions.sh` resets slot state to idle and rewrites `dashboard/state/sessions-state.json`.
 - Running it intentionally clears active slot runtime metadata and can clear persisted extras stored only in that file.
 
-### 1.3 If hook wiring changes (`.codex/hooks.json`, `.claude/settings.json`, `dashboard/scripts/codex-hook-forwarder.mjs`, `dashboard/scripts/shell-hook-writer.mjs`)
+### 1.3 If hook wiring changes (`.codex/hooks.json`, `.claude/settings.json`, `scientist-hooks/*.json`, `dashboard/scripts/codex-hook-forwarder.mjs`, `dashboard/scripts/shell-hook-writer.mjs`)
 
 1. Ensure Codex hooks feature is enabled locally:
    - `cd ~/Code/AiTrafficControl`
