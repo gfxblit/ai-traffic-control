@@ -44,7 +44,7 @@ const DISABLE_CODEX_BAR = process.argv.includes('--no-codexbar') || process.env.
 const PROVIDER_BOOT_COMMANDS = {
   codex: String(process.env.ATC_PROVIDER_BOOTSTRAP_CODEX || 'codex --dangerously-bypass-approvals-and-sandbox').trim(),
   claude: String(process.env.ATC_PROVIDER_BOOTSTRAP_CLAUDE || 'claude --dangerously-skip-permissions').trim(),
-  gemini: String(process.env.ATC_PROVIDER_BOOTSTRAP_GEMINI || 'gemini --yolo').trim(),
+  gemini: String(process.env.ATC_PROVIDER_BOOTSTRAP_GEMINI || '/opt/homebrew/bin/gemini --yolo').trim(),
 };
 const PERSONA_CONFIGS = [
   {
@@ -157,8 +157,12 @@ const HOT_DIAL_BY_ID = new Map(HOT_DIAL_AGENTS.filter((agent) => agent.enabled).
 let usageCache = { value: null, fetchedAt: 0, pending: null };
 
 function runCommand(cmd, args, timeoutMs = 12000) {
+  console.log('EXEC:', cmd, args.join(' '));
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, TMUX: '' },
+    });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -243,7 +247,7 @@ function compactText(text, max = 64) {
 
 function normalizeProvider(provider) {
   const normalized = String(provider || '').trim().toLowerCase();
-  return PROVIDERS.has(normalized) ? normalized : 'codex';
+  return PROVIDERS.has(normalized) ? normalized : 'gemini';
 }
 
 function providerBootCommand(provider) {
@@ -829,9 +833,14 @@ function shSingle(str) {
   return `'${String(str).replace(/'/g, `'\\''`)}'`;
 }
 
-function shellWithHookEnvCommand(shellConfig) {
-  if (!shellConfig?.zdotdir) return `${SHELL_BIN} -il`;
-  return `env ZDOTDIR=${shSingle(shellConfig.zdotdir)} ATC_ZDOTDIR=${shSingle(shellConfig.zdotdir)} ${shSingle(SHELL_BIN)} -il`;
+function shellWithHookEnvCommand(shellConfig, hookEnv = {}) {
+  const envPairs = [];
+  if (shellConfig?.zdotdir) {
+    envPairs.push(`ZDOTDIR=${shSingle(shellConfig.zdotdir)}`);
+    envPairs.push(`ATC_ZDOTDIR=${shSingle(shellConfig.zdotdir)}`);
+  }
+  const envPrefix = envPairs.length > 0 ? `env ${envPairs.join(' ')} ` : '';
+  return `${envPrefix}${shSingle(SHELL_BIN)} -il`;
 }
 
 async function tmuxWindowExists(sessionName, windowName) {
@@ -844,11 +853,19 @@ async function tmuxWindowExists(sessionName, windowName) {
     .includes(windowName);
 }
 
-async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
-  const shellCmd = shellWithHookEnvCommand(shellConfig);
+async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig, hookEnv = {}) {
+  const shellCmd = shellWithHookEnvCommand(shellConfig, hookEnv);
+  const envArgs = [];
+  envArgs.push('-e', `HOME=${HOME_DIRECTORY}`);
+  for (const [key, val] of Object.entries(hookEnv)) {
+    if (key.startsWith('ATC_') || key === 'GEMINI_PROJECT_DIR' || key === 'GEMINI_CLI_SYSTEM_SETTINGS_PATH') {
+      envArgs.push('-e', `${key}=${val}`);
+    }
+  }
+
   const hasSession = await runCommand(TMUX_BIN, ['has-session', '-t', sessionName], 3000);
   if (!hasSession.ok) {
-    const created = await runCommand(TMUX_BIN, ['new-session', '-d', '-s', sessionName, '-n', TMUX_SLOT_WINDOW, '-c', workdir, shellCmd], 5000);
+    const created = await runCommand(TMUX_BIN, ['new-session', '-d', '-s', sessionName, '-n', TMUX_SLOT_WINDOW, '-c', workdir, ...envArgs, shellCmd], 5000);
     if (!created.ok) throw new Error(`failed to create tmux session ${sessionName}: ${created.stderr || 'unknown error'}`);
     return;
   }
@@ -856,7 +873,7 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
   const hasWindow = await tmuxWindowExists(sessionName, TMUX_SLOT_WINDOW);
   if (hasWindow) {
     // Window already exists — respawn the pane with the new shell config.
-    const respawned = await runCommand(TMUX_BIN, ['respawn-pane', '-k', '-t', `${sessionName}:${TMUX_SLOT_WINDOW}.0`, '-c', workdir, shellCmd], 5000);
+    const respawned = await runCommand(TMUX_BIN, ['respawn-pane', '-k', '-t', `${sessionName}:${TMUX_SLOT_WINDOW}.0`, '-c', workdir, ...envArgs, shellCmd], 5000);
     if (!respawned.ok)
       throw new Error(`failed to respawn tmux pane ${sessionName}:${TMUX_SLOT_WINDOW}.0: ${respawned.stderr || 'unknown error'}`);
   } else {
@@ -865,7 +882,7 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig) {
     const firstWindow = await runCommand(TMUX_BIN, ['list-windows', '-t', sessionName, '-F', '#{window_index}'], 3000);
     const firstIdx = (firstWindow.stdout || '').trim().split('\n')[0] || '0';
     await runCommand(TMUX_BIN, ['rename-window', '-t', `${sessionName}:${firstIdx}`, TMUX_SLOT_WINDOW], 3000);
-    const respawned = await runCommand(TMUX_BIN, ['respawn-pane', '-k', '-t', `${sessionName}:${TMUX_SLOT_WINDOW}.0`, '-c', workdir, shellCmd], 5000);
+    const respawned = await runCommand(TMUX_BIN, ['respawn-pane', '-k', '-t', `${sessionName}:${TMUX_SLOT_WINDOW}.0`, '-c', workdir, ...envArgs, shellCmd], 5000);
     if (!respawned.ok)
       throw new Error(`failed to respawn tmux pane ${sessionName}:${TMUX_SLOT_WINDOW}.0: ${respawned.stderr || 'unknown error'}`);
   }
@@ -969,6 +986,8 @@ function buildAtcZshrc(env) {
     `typeset -gx ATC_SOURCE_USER_ZSHRC=${shSingle(env.ATC_SOURCE_USER_ZSHRC)}`,
     `typeset -gx ATC_USER_ZSHRC=${shSingle(env.ATC_USER_ZSHRC)}`,
     `typeset -gx ATC_USER_HISTORY_FILE=${shSingle(env.ATC_USER_HISTORY_FILE)}`,
+    `typeset -gx GEMINI_PROJECT_DIR=${shSingle(env.GEMINI_PROJECT_DIR)}`,
+    `typeset -gx GEMINI_CLI_SYSTEM_SETTINGS_PATH=${shSingle(env.GEMINI_CLI_SYSTEM_SETTINGS_PATH)}`,
     '',
     'if [[ "${ATC_SOURCE_USER_ZSHRC:-1}" != "0" && -n "${ATC_USER_ZSHRC:-}" && -r "${ATC_USER_ZSHRC}" ]]; then',
     '  source "${ATC_USER_ZSHRC}"',
@@ -1090,6 +1109,8 @@ async function ensureSlotRuntime(slotName, runId, workdir, sessionState = {}) {
     ATC_PROVIDER: provider,
     ATC_TEMPLATE_ID: templateId,
     ATC_PERSONA_ID: personaId,
+    GEMINI_PROJECT_DIR: REPO_ROOT,
+    GEMINI_CLI_SYSTEM_SETTINGS_PATH: path.join(REPO_ROOT, '.gemini', 'settings.json'),
   };
 
   await fs.writeFile(paths.zshrcFile, buildAtcZshrc(hookEnv), { mode: 0o644 });
@@ -1288,7 +1309,7 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
   const slotWorkdir = sessionState.workdir || DEFAULT_WORKDIR;
   const tmuxSessionName = tmuxSessionNameForSlot(slot.name);
   if (ENABLE_TMUX_BACKEND) {
-    await ensureTmuxSlotWindow(tmuxSessionName, slotWorkdir, shellConfig);
+    await ensureTmuxSlotWindow(tmuxSessionName, slotWorkdir, shellConfig, runtimeEnv);
     await launchProviderInTmuxSlot(tmuxSessionName, sessionState.provider, sessionState);
   }
   const ttydCommandArgs = ENABLE_TMUX_BACKEND
@@ -1378,7 +1399,7 @@ async function getMergedSessions() {
       const active = await checkPortOpen(slot.publicPort);
       const backendActive = await checkPortOpen(slot.backendPort);
       const spawnedTs = st.spawnedAt ? new Date(st.spawnedAt).getTime() : 0;
-      const inSpawnGrace = spawnedTs > 0 && Date.now() - spawnedTs < 8000;
+      const inSpawnGrace = spawnedTs > 0 && Date.now() - spawnedTs < 20000;
 
       if (st.status === 'active' && !backendActive && !inSpawnGrace) {
         st.status = 'idle';
@@ -1470,6 +1491,17 @@ async function spawnSlotByName(name, options = {}) {
   const { paths, hookEnv } = await ensureSlotRuntime(slot.name, runId, st.workdir, st);
   await emitSlotEvent(hookEnv, 'shell_start', st.workdir || DEFAULT_WORKDIR, '', '');
   const pid = await spawnSessionBackend(slot, st, { ...hookEnv }, { zdotdir: paths.zdotdir });
+
+  // Mark active early so polling sees it during startup
+  st.status = 'active';
+  st.pid = pid;
+  st.runId = runId;
+  st.spawnedAt = new Date().toISOString();
+  st.firstInteractionAt = st.firstInteractionAt || st.spawnedAt;
+  st.lastInteractionAt = st.spawnedAt;
+  state.sessions[slot.name] = st;
+  await saveState(state);
+
   const backendReady = await waitForTtydReady(slot.backendPort, 10000);
   if (!backendReady) {
     await killSessionBackend(slot, { pid });
@@ -1484,13 +1516,7 @@ async function spawnSlotByName(name, options = {}) {
     }
   }
 
-  st.status = 'active';
-  st.pid = pid;
   st.error = null;
-  st.runId = runId;
-  st.spawnedAt = new Date().toISOString();
-  st.firstInteractionAt = st.firstInteractionAt || st.spawnedAt;
-  st.lastInteractionAt = st.spawnedAt;
   state.sessions[slot.name] = st;
   await saveState(state);
 }
@@ -1618,18 +1644,359 @@ function renderPage() {
       --purple: #8c7cff;
     }
     * { box-sizing: border-box; }
+    :root {
+      --sidebar-width: 320px;
+      --header-height: 64px;
+    }
     body {
       margin: 0;
       font-family: "Avenir Next", "Avenir", "Trebuchet MS", "Segoe UI", sans-serif;
       color: var(--text);
-      background:
-        radial-gradient(1200px 600px at 0% -20%, #1f5f9d4d 0%, transparent 55%),
-        radial-gradient(1000px 600px at 100% 0%, #0b7a7044 0%, transparent 50%),
-        linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+      background: var(--bg0);
       min-height: 100vh;
-      padding: 16px;
-      overflow-anchor: none;
+      overflow: hidden;
+      display: flex;
     }
+    .app-container {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--bg1);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 100;
+      transition: transform 300ms ease, width 300ms ease;
+    }
+    .app-container.sidebar-closed .sidebar {
+      transform: translateX(-100%);
+      width: 0;
+      border-right: 0;
+    }
+    
+    @media (max-width: 768px) {
+      .sidebar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 85%;
+        max-width: 320px;
+        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+        visibility: hidden;
+        transition: transform 300ms ease, visibility 300ms ease;
+      }
+      .app-container.sidebar-open .sidebar {
+        transform: translateX(0);
+        visibility: visible;
+      }
+      .app-container:not(.sidebar-open) .sidebar {
+        transform: translateX(-100%);
+      }
+      .sidebar-overlay {
+        display: none;
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 90;
+        backdrop-filter: blur(2px);
+      }
+      .app-container.sidebar-open .sidebar-overlay {
+        display: block;
+      }
+    }
+
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #10192f;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: var(--header-height);
+      flex-shrink: 0;
+    }
+    .sidebar-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .sidebar-item {
+      padding: 12px;
+      border-radius: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 150ms ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid transparent;
+    }
+    .sidebar-item:hover {
+      background: #202d4a;
+    }
+    .sidebar-item.active {
+      background: #2c3c63;
+      border-color: #4bc6ff44;
+    }
+    .sidebar-item-img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #0d152a;
+      flex-shrink: 0;
+    }
+    .sidebar-item-info {
+      min-width: 0;
+      flex: 1;
+    }
+    .sidebar-item-name {
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sidebar-item-status {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(1000px 600px at 100% 0%, #0b7a7022 0%, transparent 50%),
+        var(--bg0);
+      position: relative;
+      min-width: 0;
+    }
+    .chat-header {
+      padding: 0 20px;
+      background: #10192fcc;
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: var(--header-height);
+      flex-shrink: 0;
+    }
+    .chat-header-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .chat-header-title {
+      font-size: 18px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    #sidebar-toggle {
+      background: transparent;
+      border: 0;
+      color: var(--text);
+      cursor: pointer;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    #sidebar-toggle:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    
+    @media (min-width: 769px) {
+      .app-container:not(.sidebar-closed) #sidebar-toggle-in-chat {
+        display: none;
+      }
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+    .message {
+      max-width: 90%;
+      padding: 10px 14px;
+      border-radius: 18px;
+      line-height: 1.5;
+      font-size: 15px;
+      position: relative;
+      word-wrap: break-word;
+    }
+    
+    @media (max-width: 480px) {
+      .chat-messages { padding: 12px; gap: 12px; }
+      .message { max-width: 95%; font-size: 14px; }
+      .chat-input-container { padding: 12px; }
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: #2c3c63;
+      border-bottom-right-radius: 4px;
+      color: #fff;
+    }
+    .message.assistant {
+      align-self: flex-start;
+      background: #1a233b;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 4px;
+    }
+    .message-content {
+      white-space: pre-wrap;
+    }
+    .message-content code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: rgba(0,0,0,0.3);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    .message-content pre {
+      background: rgba(0,0,0,0.3);
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    .message-ts {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-align: right;
+    }
+    .tool-activity {
+      font-size: 13px;
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+    .chat-input-container {
+      padding: 16px 20px 20px;
+      background: var(--bg0);
+      border-top: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+    .chat-input-wrapper {
+      max-width: 800px;
+      margin: 0 auto;
+      position: relative;
+      background: #1a233b;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      display: flex;
+      align-items: flex-end;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .chat-input {
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: #fff;
+      padding: 12px 16px;
+      font-size: 15px;
+      font-family: inherit;
+      resize: none;
+      max-height: 150px;
+      outline: none;
+    }
+    .chat-send {
+      padding: 12px;
+      background: transparent;
+      border: 0;
+      color: var(--cyan);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .chat-send:disabled {
+      color: var(--muted);
+      cursor: not-allowed;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .status-dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-dot.idle { background: var(--amber); }
+    .status-dot.unborn { background: #555; }
+
+    .chat-empty-state {
+      display: grid;
+      place-items: center;
+      height: 100%;
+      color: var(--muted);
+      text-align: center;
+      padding: 40px;
+    }
+    .btn-primary {
+      background: var(--cyan);
+      color: #000;
+      border: 0;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 16px;
+      transition: transform 150ms ease, opacity 150ms ease;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      opacity: 0.9;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-secondary:hover {
+      background: rgba(255,255,255,0.15);
+    }
+
+    /* Keep modals and other essential styles from previous version */
     body.modal-open {
       overflow: hidden;
       touch-action: none;
@@ -2708,22 +3075,54 @@ function renderPage() {
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="title-wrap">
-      <h1 class="title"><span class="decor">🗼</span><span class="accent">AI Traffic Control</span><span class="decor">💻</span></h1>
-    </section>
+  <div class="app-container" id="app-container">
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <h1 class="sidebar-title">🗼 <span style="color:#79c3ff">Traffic Control</span></h1>
+        <button type="button" id="sidebar-toggle" aria-label="Toggle Sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+      </header>
+      <div class="sidebar-content" id="sessions">
+        <!-- Sidebar items (sessions) will be rendered here -->
+      </div>
+      <div style="padding:12px; border-top:1px solid var(--line);">
+        <div class="agent-dials" id="agent-dials"></div>
+      </div>
+    </aside>
 
-    <section class="panel">
-      <div class="usage-stack" id="usage-grid"></div>
-    </section>
+    <main class="chat-area">
+      <header class="chat-header">
+        <div class="chat-header-info">
+          <button type="button" id="sidebar-toggle-in-chat" style="background:transparent; border:0; color:var(--text); cursor:pointer; padding:8px; margin-right:8px;" aria-label="Open Sidebar">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <div id="chat-header-status" class="status-dot"></div>
+          <div class="chat-header-title" id="chat-header-title">Select a Scientist</div>
+        </div>
+        <div id="chat-header-actions">
+           <!-- Actions like 'Kill' will appear here -->
+        </div>
+      </header>
 
-    <section style="margin-top:8px;">
-      <div class="agent-dials" id="agent-dials"></div>
-    </section>
+      <div class="chat-messages" id="chat-messages">
+        <div style="display:grid; place-items:center; height:100%; color:var(--muted); text-align:center; padding:40px;">
+          <div>
+            <div style="font-size:48px; margin-bottom:16px;">🗼</div>
+            <h3>Welcome to AI Traffic Control</h3>
+            <p>Select a scientist from the sidebar to start a conversation or view history.</p>
+          </div>
+        </div>
+      </div>
 
-    <section class="panel" style="margin-top:12px;">
-      <div class="sessions" id="sessions"></div>
-    </section>
+      <div class="chat-input-container">
+        <div class="chat-input-wrapper">
+          <textarea class="chat-input" id="chat-input" placeholder="Message scientist..." rows="1" disabled></textarea>
+          <button type="button" class="chat-send" id="chat-send" disabled>Send</button>
+        </div>
+      </div>
+    </main>
   </div>
 
   <div class="modal-overlay" id="intent-modal">
@@ -2853,6 +3252,7 @@ function renderPage() {
   <script>
     const refreshing = new Set();
     const spawning = new Set();
+    const spawningRecent = new Set();
     const killing = new Set();
     const HOME_DIRECTORY = ${JSON.stringify(HOME_DIRECTORY)};
     const PERSONA_NONE = ${JSON.stringify(PERSONA_NONE)};
@@ -2870,7 +3270,7 @@ function renderPage() {
       name: '',
       pictureSrc: '',
       pictureAlt: '',
-      providerKey: 'codex',
+      providerKey: 'gemini',
       templateId: 'new_brainstorm',
       personaId: PERSONA_NONE,
       workdir: HOME_DIRECTORY,
@@ -2893,6 +3293,223 @@ function renderPage() {
     };
     let latestSessionsByName = new Map();
     let sessionInteractionsBound = false;
+    let activeSessionName = null;
+    let activeSessionEvents = [];
+    let eventPollInterval = null;
+    let lastEventTs = null;
+
+    function toggleSidebar(force) {
+      const container = document.getElementById('app-container');
+      const isMobile = window.innerWidth <= 768;
+      
+      if (isMobile) {
+        container.classList.toggle('sidebar-open', force);
+        container.classList.remove('sidebar-closed');
+      } else {
+        container.classList.toggle('sidebar-closed', force === undefined ? undefined : !force);
+        container.classList.remove('sidebar-open');
+      }
+    }
+
+    function renderMessage(event) {
+      const isUser = event.eventType === 'UserPromptSubmit' || event.eventType === 'BeforeAgent';
+      const isAssistant = event.eventType === 'Stop' || event.eventType === 'AfterAgent';
+      const isTool = event.eventType === 'PreToolUse' || event.eventType === 'PostToolUse' ||
+                     event.eventType === 'BeforeTool' || event.eventType === 'AfterTool';
+      
+      if (!isUser && !isAssistant && !isTool) return '';
+
+      if (isTool) {
+        const toolName = event.payload?.tool_use?.name || event.payload?.name || event.payload?.tool_name || 'tool';
+        const status = (event.eventType === 'PreToolUse' || event.eventType === 'BeforeTool') ? 'Thinking...' : 'Executed';
+        return '<div class="tool-activity">🔧 ' + esc(toolName) + ': ' + esc(status) + '</div>';
+      }
+
+      const content = event.payload?.prompt_response || event.payload?.prompt || event.payload?.value || event.payload?.input || event.command || '';
+      if (!content) return '';
+
+      const ts = event.ts ? new Date(event.ts).toLocaleTimeString() : '';
+      const typeClass = isUser ? 'user' : 'assistant';
+      
+      return '<div class="message ' + typeClass + '">' +
+        '<div class="message-content">' + formatContent(content) + '</div>' +
+        '<div class="message-ts">' + esc(ts) + '</div>' +
+      '</div>';
+    }
+
+    function formatContent(text) {
+      const escaped = esc(text);
+      const withLines = escaped.replace(/\\n/g, '<br>');
+      const tick = String.fromCharCode(96);
+      const parts = withLines.split(tick.repeat(3));
+      let result = '';
+      for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 1) {
+          result += '<pre><code>' + parts[i] + '</code></pre>';
+        } else {
+          const inlineParts = parts[i].split(tick);
+          for (let j = 0; j < inlineParts.length; j++) {
+            if (j % 2 === 1) {
+              result += '<code>' + inlineParts[j] + '</code>';
+            } else {
+              result += inlineParts[j];
+            }
+          }
+        }
+      }
+      return result;
+    }
+
+    async function loadSessionChat(name) {
+      console.log('loadSessionChat', name);
+      await refresh(); // Force refresh to get latest state before loading
+      
+      if (activeSessionName === name) {
+        // If already active, just render immediately
+        renderChat();
+        return;
+      }
+      activeSessionName = name;
+      activeSessionEvents = [];
+      lastEventTs = null;
+      
+      const chatMessages = document.getElementById('chat-messages');
+      const chatInput = document.getElementById('chat-input');
+      const chatSend = document.getElementById('chat-send');
+      const chatTitle = document.getElementById('chat-header-title');
+      const chatActions = document.getElementById('chat-header-actions');
+      const chatStatus = document.getElementById('chat-header-status');
+      
+      chatMessages.innerHTML = '<div class="chat-empty-state">Loading history…</div>';
+      chatTitle.textContent = name;
+      
+      const session = latestSessionsByName.get(name);
+      const isActive = session && session.status === 'active';
+      const isSpawning = spawning.has(name) || spawningRecent.has(name);
+      
+      chatInput.disabled = !isActive;
+      chatSend.disabled = !isActive;
+      chatInput.placeholder = isActive ? 'Message ' + name + '...' : (isSpawning ? 'Scientist is starting...' : name + ' is offline');
+
+      // Update Header
+      chatStatus.className = 'status-dot ' + (isActive ? 'active' : (isSpawning ? 'active' : (session?.status === 'idle' ? 'idle' : 'unborn')));
+      chatActions.innerHTML = '';
+      if (isActive && session.backendActive) {
+        chatActions.innerHTML = '<a href="' + connectUrlForPort(session.publicPort) + '" target="_blank" class="btn-secondary">💻 Terminal</a>';
+      }
+
+      try {
+        await fetchEvents();
+      } catch (err) {
+        console.error('Initial fetch failed', err);
+      } finally {
+        renderChat();
+      }
+      
+      if (eventPollInterval) clearInterval(eventPollInterval);
+      eventPollInterval = setInterval(fetchEvents, 2000);
+      
+      if (window.innerWidth <= 768) {
+        toggleSidebar(false);
+      }
+      refresh(); // Update sidebar active state
+    }
+
+    async function fetchEvents() {
+      if (!activeSessionName) return;
+      try {
+        const events = await apiGet('/api/sessions/events?name=' + encodeURIComponent(activeSessionName));
+        if (JSON.stringify(events) !== JSON.stringify(activeSessionEvents)) {
+          activeSessionEvents = events;
+          renderChat();
+        }
+      } catch (err) {
+        // If it's a 404, it just means no events file yet (unborn)
+        if (activeSessionEvents.length !== 0) {
+          activeSessionEvents = [];
+          renderChat();
+        }
+      }
+    }
+
+    function renderChat() {
+      const chatMessages = document.getElementById('chat-messages');
+      if (!chatMessages || !activeSessionName) return;
+      
+      const session = latestSessionsByName.get(activeSessionName);
+      console.log('renderChat activeSessionName:', activeSessionName, 'session found:', !!session);
+      if (!session) {
+        if (chatMessages.innerHTML !== '<div class="chat-empty-state">Loading session data…</div>') {
+          chatMessages.innerHTML = '<div class="chat-empty-state">Loading session data…</div>';
+        }
+        return;
+      }
+
+      // Filter for events that actually produce a visible message/bubble
+      const renderableEvents = activeSessionEvents.filter(function(e) {
+        return e.eventType === 'UserPromptSubmit' || e.eventType === 'BeforeAgent' ||
+               e.eventType === 'Stop' || e.eventType === 'AfterAgent' ||
+               e.eventType === 'PreToolUse' || e.eventType === 'BeforeTool' ||
+               e.eventType === 'PostToolUse' || e.eventType === 'AfterTool';
+      });
+
+      if (renderableEvents.length === 0) {
+        const isActive = session.status === 'active';
+        const isSpawning = spawning.has(activeSessionName) || spawningRecent.has(activeSessionName);
+        let nextHtml = '';
+        
+        if (!isActive && !isSpawning) {
+          nextHtml = '<div class="chat-empty-state">' +
+            '<div style="font-size:48px; margin-bottom:16px;">🗼</div>' +
+            '<h3>' + esc(activeSessionName) + ' is offline</h3>' +
+            '<p>Kicking off a session will spawn a terminal and start the AI agent.</p>' +
+            '<button type="button" class="btn-primary" id="btn-start-session">Start Session</button>' +
+            '<div style="margin-top:16px;"><a href="#" onclick="event.preventDefault(); refresh();" style="color:var(--muted); font-size:12px; text-decoration:none;">↻ Manual Refresh</a></div>' +
+          '</div>';
+        } else if (isSpawning) {
+          nextHtml = '<div class="chat-empty-state">' +
+            '<div class="usage-spinner"></div>' +
+            '<h3>Starting ' + esc(activeSessionName) + '…</h3>' +
+          '</div>';
+        } else {
+          nextHtml = '<div class="chat-empty-state">No conversation yet.</div>';
+        }
+
+        if (chatMessages.innerHTML !== nextHtml) {
+          chatMessages.innerHTML = nextHtml;
+          const btn = document.getElementById('btn-start-session');
+          if (btn) {
+            btn.onclick = function() {
+              openIntentModal(activeSessionName, session?.picturePath || '');
+            };
+          }
+        }
+        return;
+      }
+
+      const html = activeSessionEvents.map(renderMessage).join('');
+      if (chatMessages.innerHTML !== html) {
+        const shouldScroll = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 100;
+        chatMessages.innerHTML = html;
+        if (shouldScroll) chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text || !activeSessionName) return;
+      
+      input.value = '';
+      input.style.height = 'auto';
+      
+      try {
+        await apiPost('/api/sessions/input', { name: activeSessionName, text: text });
+        // Optimistic event will be picked up by polling
+      } catch (err) {
+        alert('Failed to send: ' + err.message);
+      }
+    }
 
     let bodyScrollLockDepth = 0;
     let bodyScrollLockY = 0;
@@ -3707,6 +4324,15 @@ function renderPage() {
     }
 
     function bindStaticModalInteractions() {
+      const sidebarToggle = document.getElementById('sidebar-toggle');
+      if (sidebarToggle) sidebarToggle.addEventListener('click', function() { toggleSidebar(); });
+      
+      const sidebarToggleInChat = document.getElementById('sidebar-toggle-in-chat');
+      if (sidebarToggleInChat) sidebarToggleInChat.addEventListener('click', function() { toggleSidebar(true); });
+      
+      const sidebarOverlay = document.getElementById('sidebar-overlay');
+      if (sidebarOverlay) sidebarOverlay.addEventListener('click', function() { toggleSidebar(false); });
+
       const intentClose = document.getElementById('intent-close');
       if (intentClose) intentClose.addEventListener('click', function (ev) { ev.preventDefault(); closeIntentModal(); });
       const intentCancel = document.getElementById('intent-cancel');
@@ -3832,6 +4458,7 @@ function renderPage() {
       if (refreshing.has(name)) return;
       refreshing.add(name);
       spawning.add(name);
+      spawningRecent.add(name);
       if (uiOptions && uiOptions.autoScroll) focusSessionCard(name);
       refresh().catch(() => {});
       try {
@@ -3840,11 +4467,13 @@ function renderPage() {
         await apiPost('/api/sessions/spawn', payload);
       } catch (err) {
         alert('Spawn failed for ' + name + ': ' + err.message);
+        spawningRecent.delete(name);
       } finally {
         spawning.delete(name);
         refreshing.delete(name);
         await refresh();
         if (uiOptions && uiOptions.autoScroll) focusSessionCard(name);
+        setTimeout(function() { spawningRecent.delete(name); refresh(); }, 5000);
         setTimeout(refresh, 350);
         setTimeout(refresh, 900);
         setTimeout(refresh, 1600);
@@ -3893,124 +4522,76 @@ function renderPage() {
     }
 
     function sessionCard(s) {
-      const hasBackend = s.status === 'active' && s.backendActive;
       const isSpawning = spawning.has(s.name);
       const isKilling = killing.has(s.name);
+      const hasBackend = s.status === 'active' && s.backendActive;
       const FIVE_MIN = 5 * 60 * 1000;
       const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN;
       const isIdle = hasBackend && !isActive;
       const isUnborn = !hasBackend && !isSpawning;
-      const sessionState = isSpawning ? 'starting' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
-      const hasAgent = !!(s.telemetry && s.telemetry.agentType && s.telemetry.agentType !== 'none');
-      const personaId = normalizePersonaId(s.personaId);
+      
+      const statusClass = isSpawning ? 'active' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
+      const activeClass = activeSessionName === s.name ? 'active' : '';
       const pictureSrc = sessionPictureSrc(s);
-      const pictureAlt = s.name + ' portrait';
-      const rawTaskTitle = String(s.taskTitle || '').trim();
-      const taskTitle = rawTaskTitle && !/^shell:\s*/i.test(rawTaskTitle) ? rawTaskTitle : 'Not set';
-      const actionText = isKilling ? 'Stopping terminal…' : (isSpawning ? 'Starting terminal…' : (hasBackend ? 'Tap to connect' : 'Tap to start'));
-      const actionClass = isKilling ? 'color-killing' : (isSpawning ? 'color-starting' : (isActive ? 'color-active' : (isIdle ? 'color-idle' : 'color-unborn')));
-      const badgeClass = sessionState;
-      const badgeText = sessionState;
-      const hat = personaHatMarkup(personaForId(personaId), 'session');
+      const providerKey = s.provider || 'gemini';
+      const renderKey = [statusClass, activeClass, pictureSrc, s.name, providerKey].join('::');
 
-      const providerKey = s.provider || 'codex';
-      const providerLogoMap = { codex: '/assets/logos/openai.svg?v=2', claude: '/assets/logos/anthropic.svg?v=2', gemini: '/assets/logos/google.svg?v=2' };
-      const providerLogoSrc = providerLogoMap[providerKey] || providerLogoMap.codex;
-      const agentIconKind = (s.agentType === 'calendar_manager') ? 'calendar' : (s.agentType === 'second_brain') ? 'brain' : null;
-      const agentTypeTag = agentIconKind && !isUnborn ? '<span class="agent-type-tag">' + dialIconSvg(agentIconKind, 'agent-type-icon') + '</span>' : '';
-      const renderKey = [
-        sessionState,
-        hasBackend ? '1' : '0',
-        isSpawning ? '1' : '0',
-        isKilling ? '1' : '0',
-        personaId,
-        pictureSrc,
-        taskTitle,
-        s.workdir || '',
-        providerKey,
-        hasAgent ? '1' : '0',
-        String(s.agentType || ''),
-        String((s.telemetry && s.telemetry.turnCount) ? s.telemetry.turnCount : 0),
-        String((s.telemetry && Number.isFinite(Number(s.telemetry.contextWindowPct))) ? Math.round(Number(s.telemetry.contextWindowPct)) : 'na'),
-        s.startedAgo || 'n/a',
-        s.lastInteractionAgo || 'n/a',
-        s.error || '',
-      ].join('::');
-
-      return '<article class="session tap state-' + esc(sessionState) + (isSpawning ? ' spawning' : '') + (isKilling ? ' killing' : '') + '" data-name="' + esc(s.name) + '" data-picture-src="' + esc(pictureSrc) + '" data-persona-id="' + esc(personaId) + '" data-active="' + (hasBackend ? '1' : '0') + '" data-spawning="' + (isSpawning ? '1' : '0') + '" data-killing="' + (isKilling ? '1' : '0') + '" data-render-key="' + esc(renderKey) + '">' +
-        agentTypeTag +
-        (!isUnborn ? '<span class="provider-tag"><img src="' + esc(providerLogoSrc) + '" alt="' + esc(providerKey) + '" width="20" height="20" /></span>' : '') +
-        '<button type="button" class="kill" ' + (hasBackend ? '' : 'disabled') + ' data-kill="1" data-name="' + esc(s.name) + '" aria-label="Kill ' + esc(s.name) + '">&times;</button>' +
-        '<div class="session-media">' +
-          (pictureSrc
-            ? '<img class="session-picture" src="' + esc(pictureSrc) + '" alt="' + esc(pictureAlt) + '" loading="lazy" decoding="async" />'
-            : '<div class="session-media-fallback" aria-hidden="true">' + esc(String(s.name || '?').trim().slice(0, 1).toUpperCase()) + '</div>') +
+      return '<div class="sidebar-item session tap ' + activeClass + '" data-name="' + esc(s.name) + '" data-render-key="' + esc(renderKey) + '">' +
+        (pictureSrc 
+          ? '<img class="sidebar-item-img" src="' + esc(pictureSrc) + '" alt="' + esc(s.name) + '" />'
+          : '<div class="sidebar-item-img" style="background:#2c3c63; display:grid; place-items:center; font-weight:700;">' + esc(s.name[0].toUpperCase()) + '</div>') +
+        '<div class="sidebar-item-info">' +
+          '<div class="sidebar-item-name">' + esc(s.name) + '</div>' +
+          '<div class="sidebar-item-status"><span class="status-dot ' + statusClass + '"></span> ' + esc(statusClass) + '</div>' +
         '</div>' +
-        hat +
-        '<div class="session-body">' +
-          '<div class="head">' +
-            '<div class="head-main">' +
-              '<div class="name">' + esc(s.name) + '</div>' +
-              '<div class="head-badges">' +
-                '<span class="badge ' + esc(badgeClass) + '">' + esc(badgeText) + '</span>' +
-                personaBadge(personaId) +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-          '<div class="line"><strong>Task:</strong> ' + esc(taskTitle) + '</div>' +
-          '<div class="line"><strong>Workdir:</strong> ' + esc(s.workdir || 'Not set') + '</div>' +
-          (hasAgent
-            ? '<div class="line muted">Agent: ' + esc(s.agentType || 'none') + ' | Turns: ' + esc((s.telemetry && s.telemetry.turnCount) ? s.telemetry.turnCount : 0) + '</div>'
-            : '') +
-          (hasAgent
-            ? '<div class="line muted">Context window: ' + esc((s.telemetry && Number.isFinite(Number(s.telemetry.contextWindowPct))) ? (Math.round(Number(s.telemetry.contextWindowPct)) + '%') : 'N/A') + '</div>'
-            : '') +
-          '<div class="line muted">Active for: ' + esc(s.startedAgo || 'n/a') + ' | Last interaction: ' + (isIdle ? '<strong>' : '') + esc(s.lastInteractionAgo || 'n/a') + (isIdle ? '</strong>' : '') + '</div>' +
-          (s.error ? '<div class="line error">' + esc(s.error) + '</div>' : '') +
-          '<div class="action-hint ' + actionClass + '">' + esc(actionText) + '</div>' +
-        '</div>' +
-      '</article>';
+      '</div>';
     }
 
     function makeSessionCardNode(htmlString) {
-      const template = document.createElement('template');
-      template.innerHTML = htmlString.trim();
-      return template.content.firstElementChild;
+      try {
+        const template = document.createElement('template');
+        template.innerHTML = htmlString.trim();
+        return template.content.firstElementChild;
+      } catch (err) {
+        console.error('makeSessionCardNode error', err);
+        return null;
+      }
     }
 
     function bindSessionInteractions() {
-      if (sessionInteractionsBound) return;
       const sessionsEl = document.getElementById('sessions');
-      if (!sessionsEl) return;
-      sessionInteractionsBound = true;
+      if (!sessionsEl || sessionsEl.dataset.bound === '1') return;
+      sessionsEl.dataset.bound = '1';
 
-      sessionsEl.addEventListener('click', async function (ev) {
-        const killBtn = ev.target.closest('[data-kill="1"]');
-        if (killBtn) {
-          ev.stopPropagation();
-          if (killBtn.hasAttribute('disabled')) return;
-          const killName = killBtn.getAttribute('data-name');
-          if (!killName) return;
-          openKillModal(killName);
-          return;
-        }
-
-        const card = ev.target.closest('.session.tap');
-        if (!card || !sessionsEl.contains(card)) return;
-        const name = card.getAttribute('data-name');
-        const item = latestSessionsByName.get(name);
+      sessionsEl.addEventListener('click', function (ev) {
+        const item = ev.target.closest('.sidebar-item');
         if (!item) return;
-
-        const active = item.status === 'active' && item.backendActive;
-        const isSpawning = spawning.has(item.name);
-        if (isSpawning) return;
-        if (active) {
-          await prewarmPublicEndpoint(item.publicPort);
-          window.open(connectUrlForPort(item.publicPort), '_blank', 'noopener,noreferrer');
-          return;
-        }
-        openIntentModal(item.name, card.getAttribute('data-picture-src') || '');
+        const name = item.getAttribute('data-name');
+        loadSessionChat(name);
       });
+
+      const chatInput = document.getElementById('chat-input');
+      const chatSend = document.getElementById('chat-send');
+      
+      if (chatInput) {
+        chatInput.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' && !ev.shiftKey) {
+            ev.preventDefault();
+            sendMessage();
+          }
+        });
+        chatInput.addEventListener('input', function() {
+          this.style.height = 'auto';
+          this.style.height = this.scrollHeight + 'px';
+        });
+      }
+      
+      if (chatSend) {
+        chatSend.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          sendMessage();
+        });
+      }
     }
 
     function renderUsageGrid(usage) {
@@ -4031,6 +4612,7 @@ function renderPage() {
     function renderSessions(sessionsPayload) {
       const sessions = sessionsPayload.sessions || [];
       latestSessionsByName = new Map(sessions.map(function (s) { return [s.name, s]; }));
+      console.log('latestSessionsByName keys:', Array.from(latestSessionsByName.keys()));
       const latestRecent = Array.isArray(sessionsPayload.recentWorkdirs) ? sessionsPayload.recentWorkdirs : [];
       recentWorkdirs.splice(0, recentWorkdirs.length, ...latestRecent);
       const sessionsEl = document.getElementById('sessions');
@@ -4044,15 +4626,18 @@ function renderPage() {
 
       const existingCards = new Map();
       const existingElements = Array.from(sessionsEl.children).filter(function (el) {
-        return el.matches && el.matches('.session.tap[data-name]');
+        return el.matches && el.matches('.sidebar-item[data-name]');
       });
       for (const el of existingElements) {
         existingCards.set(el.getAttribute('data-name'), el);
       }
 
       sessions.forEach(function (s, index) {
-        const nextNode = makeSessionCardNode(sessionCard(s));
-        const nextKey = nextNode ? nextNode.getAttribute('data-render-key') : '';
+        const cardHtml = sessionCard(s);
+        const nextNode = makeSessionCardNode(cardHtml);
+        if (!nextNode) return;
+        
+        const nextKey = nextNode.getAttribute('data-render-key') || '';
         const existing = existingCards.get(s.name);
         let cardEl = existing;
         if (!cardEl) {
@@ -4063,12 +4648,16 @@ function renderPage() {
         }
 
         const anchoredAt = sessionsEl.children[index] || null;
-        if (cardEl !== anchoredAt) sessionsEl.insertBefore(cardEl, anchoredAt);
+        if (cardEl !== anchoredAt) {
+          sessionsEl.insertBefore(cardEl, anchoredAt);
+        }
       });
+
+      if (activeSessionName) renderChat();
 
       const validNames = new Set(sessions.map(function (s) { return s.name; }));
       for (const el of Array.from(sessionsEl.children)) {
-        if (!el.matches || !el.matches('.session.tap[data-name]')) {
+        if (!el.matches || !el.matches('.sidebar-item[data-name]')) {
           el.remove();
           continue;
         }
@@ -4080,14 +4669,12 @@ function renderPage() {
       const sessionsTask = fetch('/api/sessions', { cache: 'no-store' })
         .then(function (resp) { return resp.json(); })
         .then(function (payload) { renderSessions(payload || {}); })
-        .catch(function () {});
+        .catch(function (err) { console.error('refresh sessions failed', err); });
 
       const usageTask = fetch('/api/usage', { cache: 'no-store' })
         .then(function (resp) { return resp.json(); })
         .then(function (usage) { renderUsageGrid(usage || {}); })
-        .catch(function () {
-          renderUsageGrid(latestUsage);
-        });
+        .catch(function () { renderUsageGrid(latestUsage); });
 
       await Promise.allSettled([sessionsTask, usageTask]);
     }
@@ -4257,6 +4844,63 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/api/sessions/events' && req.method === 'GET') {
+    try {
+      const name = String(url.searchParams.get('name') || '').trim();
+      if (!name) {
+        json(res, 400, { error: 'name is required' });
+        return;
+      }
+      const runtime = slotRuntimePaths(name);
+      if (!fsSync.existsSync(runtime.eventsFile)) {
+        json(res, 404, { error: 'session not found' });
+        return;
+      }
+      const events = await readEvents(runtime.eventsFile);
+      json(res, 200, events);
+    } catch (error) {
+      json(res, 500, { error: error.message || 'failed to read events' });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/sessions/input' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      const text = body.text === undefined ? '' : String(body.text);
+      if (!name) {
+        json(res, 400, { error: 'name is required' });
+        return;
+      }
+
+      console.log('INPUT PROXY:', { name, text });
+
+      if (ENABLE_TMUX_BACKEND) {
+        const sessionName = tmuxSessionNameForSlot(name);
+        const target = `${sessionName}:${TMUX_SLOT_WINDOW}.0`;
+        console.log('INPUT TARGET:', target);
+        if (text.length > 0) {
+          const res1 = await runCommand(TMUX_BIN, ['send-keys', '-t', target, '-l', text], 3000);
+          console.log('SEND TEXT RESULT:', res1.ok, res1.stderr || '');
+          await new Promise(r => setTimeout(r, 500));
+        }
+        // Send multiple Enters with delays to ensure submission in different terminal modes
+        for (let i = 0; i < 3; i++) {
+          await runCommand(TMUX_BIN, ['send-keys', '-t', target, 'Enter'], 3000);
+          await new Promise(r => setTimeout(r, 500));
+        }
+        console.log('SEND ENTERS COMPLETED');
+      }
+      
+      json(res, 200, { ok: true });
+    } catch (error) {
+      console.error('INPUT ERROR:', error);
+      json(res, 500, { error: error.message || 'failed to send input' });
+    }
+    return;
+  }
+
   json(res, 404, { error: 'not found' });
 });
 
@@ -4281,6 +4925,9 @@ if (process.env.DASHBOARD_TEST_IMPORT !== '1') {
 }
 
 export {
+  server,
+  startDashboardServer,
+  spawnSlotByName,
   ago,
   buildProviderLaunchCommand,
   durationSince,
