@@ -54,6 +54,36 @@ test('API Sessions Endpoints', async (t) => {
     assert.strictEqual(data[0].eventType, 'UserPromptSubmit');
   });
 
+  await t.test('POST /api/sessions/clear clears events and metadata', async () => {
+    const slotDir = path.join(runtimeDir, 'slots', 'test-session', 'current');
+    const eventsFile = path.join(slotDir, 'events.jsonl');
+    const metaFile = path.join(slotDir, 'meta.json');
+    const derivedFile = path.join(slotDir, 'derived.json');
+
+    fs.writeFileSync(eventsFile, JSON.stringify({ ts: new Date().toISOString(), eventType: 'UserPromptSubmit' }) + '\n');
+    fs.writeFileSync(metaFile, JSON.stringify({ eventCount: 1, userPromptCount: 1, lastCommand: 'ls' }));
+    fs.writeFileSync(derivedFile, JSON.stringify({ eventCount: 1, lastCommand: 'ls' }));
+
+    const res = await fetch(`${BASE_URL}/api/sessions/clear`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'test-session' }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+    assert.strictEqual(res.statusCode, 200);
+
+    const events = fs.readFileSync(eventsFile, 'utf8');
+    assert.strictEqual(events.trim(), '');
+
+    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    assert.strictEqual(meta.eventCount, 0);
+    assert.strictEqual(meta.userPromptCount, 0);
+    assert.ok(!meta.lastCommand);
+
+    const derived = JSON.parse(fs.readFileSync(derivedFile, 'utf8'));
+    assert.strictEqual(derived.eventCount, 0);
+    assert.ok(!derived.lastCommand);
+  });
+
   await t.test('POST /api/sessions/input returns 400 for missing name or text', async () => {
     const res = await fetch(`${BASE_URL}/api/sessions/input`, {
       method: 'POST',

@@ -1558,6 +1558,30 @@ async function launchHotDialAgent(dialId, provider) {
   return { slotName: selectedSlot.name, agentId: agent.id };
 }
 
+async function clearSlotHistory(name) {
+  const paths = slotRuntimePaths(name);
+  if (fsSync.existsSync(paths.eventsFile)) {
+    await fs.writeFile(paths.eventsFile, '', 'utf8');
+  }
+  if (fsSync.existsSync(paths.metaFile)) {
+    const meta = await readJsonSafe(paths.metaFile, {});
+    meta.eventCount = 0;
+    meta.userPromptCount = 0;
+    delete meta.lastCommand;
+    delete meta.lastCommandAt;
+    delete meta.lastDurationMs;
+    await writeJsonAtomic(paths.metaFile, meta);
+  }
+  if (fsSync.existsSync(paths.derivedFile)) {
+    const derived = await readJsonSafe(paths.derivedFile, {});
+    derived.eventCount = 0;
+    delete derived.lastCommand;
+    delete derived.lastCommandAt;
+    delete derived.durationMs;
+    await writeJsonAtomic(paths.derivedFile, derived);
+  }
+}
+
 async function killSlotByName(name) {
   const [cfg, state] = await Promise.all([readSessionsConfig(), loadState()]);
   const slot = cfg.find((s) => s.name === name);
@@ -3255,6 +3279,14 @@ function renderPage() {
   </div>
 
   <script>
+    function esc(v) {
+      return String(v)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
     const refreshing = new Set();
     const spawning = new Set();
     const spawningRecent = new Set();
@@ -3400,8 +3432,9 @@ function renderPage() {
       chatStatus.className = 'status-dot ' + (isActive ? 'active' : (isSpawning ? 'active' : (session?.status === 'idle' ? 'idle' : 'unborn')));
       chatActions.innerHTML = '';
       if (isActive && session.backendActive) {
-        chatActions.innerHTML = '<a href="' + connectUrlForPort(session.publicPort) + '" target="_blank" class="btn-secondary">💻 Terminal</a>';
+        chatActions.innerHTML = '<a href="' + connectUrlForPort(session.publicPort) + '" target="_blank" class="btn-secondary">💻 Terminal</a> ';
       }
+      chatActions.innerHTML += '<button type="button" class="btn-secondary" onclick="clearChatHistory(\\\'' + esc(name) + '\\\')" title="Clear history">🧹 Clear</button>';
 
       try {
         await fetchEvents();
@@ -3542,15 +3575,6 @@ function renderPage() {
       body.classList.remove('modal-open');
       body.style.overflow = '';
       body.style.touchAction = '';
-    }
-
-    function esc(v) {
-      return String(v)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
     }
 
     function dialIconSvg(kind, klass = 'agent-dial-icon') {
@@ -4506,6 +4530,19 @@ function renderPage() {
       }
     }
 
+    async function clearChatHistory(name) {
+      if (!confirm('Are you sure you want to clear the chat history for ' + name + '?')) return;
+      try {
+        await apiPost('/api/sessions/clear', { name: name });
+        if (activeSessionName === name) {
+          activeSessionEvents = [];
+          renderChat();
+        }
+      } catch (err) {
+        alert('Clear history failed: ' + err.message);
+      }
+    }
+
     async function killSession(name, uiOptions = {}) {
       if (refreshing.has(name)) return;
       refreshing.add(name);
@@ -4829,6 +4866,22 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { ok: true, name });
     } catch (error) {
       json(res, 500, { error: error.message || 'kill failed' });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/sessions/clear' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      if (!name) {
+        json(res, 400, { error: 'name is required' });
+        return;
+      }
+      await clearSlotHistory(name);
+      json(res, 200, { ok: true, name });
+    } catch (error) {
+      json(res, 500, { error: error.message || 'clear failed' });
     }
     return;
   }
