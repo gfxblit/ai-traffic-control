@@ -85,7 +85,7 @@ for (const s of sessions) {
 }
 fs.mkdirSync(path.dirname(stateFile), { recursive: true });
 fs.writeFileSync(stateFile, JSON.stringify(out, null, 2) + "\n", "utf8");
-' "$SESSIONS_FILE" "$STATE_FILE" "$REPO_ROOT"
+' "$SESSIONS_FILE" "$STATE_FILE" "$HOME"
 
 cat >"$NGINX_CONF" <<EOF
 worker_processes 1;

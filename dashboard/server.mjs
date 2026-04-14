@@ -8,6 +8,7 @@ import net from 'node:net';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -342,9 +343,21 @@ function appendRecentWorkdir(state, workdir) {
 }
 
 async function resolveWorkdirForSpawn(templateId, requestedWorkdir) {
-  if (templateId === TEMPLATE_NEW_BRAINSTORM) return HOME_DIRECTORY;
-  const candidate = String(requestedWorkdir || '').trim() || HOME_DIRECTORY;
-  const fullPath = path.resolve(candidate);
+  const candidate = String(requestedWorkdir || '').trim();
+  if (templateId === TEMPLATE_NEW_BRAINSTORM) {
+    if (candidate) {
+      const fullPath = path.resolve(candidate);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (stat.isDirectory()) return fullPath;
+      } catch {
+        // ignore and fall back to HOME_DIRECTORY for new brainstorm if invalid
+      }
+    }
+    return HOME_DIRECTORY;
+  }
+  const effectiveCandidate = candidate || HOME_DIRECTORY;
+  const fullPath = path.resolve(effectiveCandidate);
   let stat;
   try {
     stat = await fs.stat(fullPath);
@@ -857,6 +870,10 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig, hookEnv =
   const shellCmd = shellWithHookEnvCommand(shellConfig, hookEnv);
   const envArgs = [];
   envArgs.push('-e', `HOME=${HOME_DIRECTORY}`);
+  if (shellConfig?.zdotdir) {
+    envArgs.push('-e', `ZDOTDIR=${shellConfig.zdotdir}`);
+    envArgs.push('-e', `ATC_ZDOTDIR=${shellConfig.zdotdir}`);
+  }
   for (const [key, val] of Object.entries(hookEnv)) {
     if (key.startsWith('ATC_') || key === 'GEMINI_PROJECT_DIR' || key === 'GEMINI_CLI_SYSTEM_SETTINGS_PATH') {
       envArgs.push('-e', `${key}=${val}`);
@@ -868,6 +885,12 @@ async function ensureTmuxSlotWindow(sessionName, workdir, shellConfig, hookEnv =
     const created = await runCommand(TMUX_BIN, ['new-session', '-d', '-s', sessionName, '-n', TMUX_SLOT_WINDOW, '-c', workdir, ...envArgs, shellCmd], 5000);
     if (!created.ok) throw new Error(`failed to create tmux session ${sessionName}: ${created.stderr || 'unknown error'}`);
     return;
+  }
+
+  // Ensure ZDOTDIR is set in the session environment for subsequent panes/windows
+  if (shellConfig?.zdotdir) {
+    await runCommand(TMUX_BIN, ['set-environment', '-t', sessionName, 'ZDOTDIR', shellConfig.zdotdir], 3000);
+    await runCommand(TMUX_BIN, ['set-environment', '-t', sessionName, 'ATC_ZDOTDIR', shellConfig.zdotdir], 3000);
   }
 
   const hasWindow = await tmuxWindowExists(sessionName, TMUX_SLOT_WINDOW);
@@ -1044,11 +1067,12 @@ function buildAtcZshrc(env) {
     '  add-zsh-hook precmd _atc_precmd',
     '  add-zsh-hook chpwd _atc_chpwd',
     '',
-    '  _atc_emit "shell_start" "" ""',
+    '  _atc_emit \"shell_start\" \"\" \"\"',
     'fi',
     '',
-  ].join('\n');
-}
+    `cd ${shSingle(env.ATC_WORKDIR || env.ATC_SLOT_DIR)}`,
+    ].join('\n');
+    }
 
 async function ensureSlotRuntime(slotName, runId, workdir, sessionState = {}) {
   const paths = slotRuntimePaths(slotName);
@@ -1106,6 +1130,7 @@ async function ensureSlotRuntime(slotName, runId, workdir, sessionState = {}) {
     ATC_SOURCE_USER_ZSHRC: SOURCE_USER_ZSHRC ? '1' : '0',
     ATC_USER_ZSHRC: USER_ZSHRC_PATH,
     ATC_USER_HISTORY_FILE: USER_HISTORY_FILE,
+    ATC_WORKDIR: workdir,
     ATC_PROVIDER: provider,
     ATC_TEMPLATE_ID: templateId,
     ATC_PERSONA_ID: personaId,
@@ -1470,17 +1495,25 @@ async function spawnSlotByName(name, options = {}) {
   const agentPromptFile = typeof options.agentPromptFile === 'string' && options.agentPromptFile.trim() ? options.agentPromptFile.trim() : null;
   const requestedWorkdir = typeof options.workdir === 'string' ? options.workdir : '';
   const effectiveWorkdirInput = requestedWorkdir.trim() || (templateProvided ? HOME_DIRECTORY : (st.workdir || DEFAULT_WORKDIR));
-  const workdir = agentType && requestedWorkdir.trim()
+  
+
+  const workdir = (requestedWorkdir.trim())
     ? path.resolve(requestedWorkdir.trim())
     : await resolveWorkdirForSpawn(templateId, effectiveWorkdirInput);
+  
 
   const alreadyUp = await checkPortOpen(slot.backendPort);
-  if (alreadyUp) {
+  if (alreadyUp && st.workdir === workdir) {
     st.status = 'active';
     if (!st.spawnedAt) st.spawnedAt = new Date().toISOString();
     state.sessions[slot.name] = st;
     await saveState(state);
     return;
+  }
+  
+  if (alreadyUp && st.workdir !== workdir) {
+    // If the workdir changed, kill the old one so it can respawn with the new directory.
+    await killSessionBackend(slot, st);
   }
 
   const runId = makeRunId();
@@ -1526,7 +1559,7 @@ async function spawnSlotByName(name, options = {}) {
   await saveState(state);
 }
 
-async function launchHotDialAgent(dialId, provider) {
+async function launchHotDialAgent(dialId, provider, workdir = null) {
   const agent = HOT_DIAL_BY_ID.get(String(dialId || '').trim());
   if (!agent) throw new Error('unknown hot dial agent');
 
@@ -1549,7 +1582,7 @@ async function launchHotDialAgent(dialId, provider) {
     provider: normalizeProvider(provider),
     templateId: TEMPLATE_NEW_BRAINSTORM,
     personaId: PERSONA_NONE,
-    workdir: agent.workdir || HOME_DIRECTORY,
+    workdir: workdir || agent.workdir || HOME_DIRECTORY,
     taskTitle: agent.title,
     agentType: agent.id,
     agentPromptFile,
@@ -3195,7 +3228,7 @@ function renderPage() {
         <div class="intent-label">Persona</div>
         <div id="persona-selector"></div>
       </div>
-      <div class="intent-block" id="workdir-block" style="display:none;">
+      <div class="intent-block" id="workdir-block">
         <div class="intent-label">Working Directory</div>
         <div class="workdir-row">
           <div class="workdir-path" id="workdir-path"></div>
@@ -3250,6 +3283,17 @@ function renderPage() {
               <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3l5 5-5 5"/></svg>
             </button>
           </div>
+        </div>
+      </div>
+      <div class="intent-block">
+        <div class="intent-label">Working Directory</div>
+        <div class="workdir-row">
+          <div class="workdir-path" id="agent-workdir-path"></div>
+          <button type="button" class="choose-btn" id="agent-choose-workdir">Choose folder</button>
+        </div>
+        <div class="recent-workdirs">
+          <div class="recent-workdirs-label">Recent Directories</div>
+          <div class="recent-workdirs-list" id="agent-recent-workdirs-list"></div>
         </div>
       </div>
       <div class="intent-block">
@@ -3327,6 +3371,7 @@ function renderPage() {
       open: false,
       dialId: '',
       providerKey: 'codex',
+      workdir: HOME_DIRECTORY,
     };
     let latestSessionsByName = new Map();
     let sessionInteractionsBound = false;
@@ -3953,6 +3998,7 @@ function renderPage() {
       agentState.open = true;
       agentState.dialId = agent.id;
       agentState.providerKey = 'codex';
+      agentState.workdir = agent.workdir || HOME_DIRECTORY;
       renderAgentModal();
       const modal = document.getElementById('agent-modal');
       if (modal) modal.classList.add('open');
@@ -3969,7 +4015,7 @@ function renderPage() {
 
     function openDirPicker() {
       pickerState.open = true;
-      pickerState.path = intentState.workdir || HOME_DIRECTORY;
+      pickerState.path = (agentState.open ? agentState.workdir : intentState.workdir) || HOME_DIRECTORY;
       const modal = document.getElementById('dir-picker-modal');
       if (modal) modal.classList.add('open');
       loadDirectory(pickerState.path).catch((err) => {
@@ -4093,8 +4139,6 @@ function renderPage() {
       const workdirBlock = document.getElementById('workdir-block');
       const workdirPath = document.getElementById('workdir-path');
       const recentList = document.getElementById('recent-workdirs-list');
-      const continueWork = intentState.templateId === 'continue_work';
-      if (workdirBlock) workdirBlock.style.display = continueWork ? 'block' : 'none';
       if (workdirPath) workdirPath.textContent = intentState.workdir || HOME_DIRECTORY;
       if (recentList) {
         if (!recentWorkdirs.length) {
@@ -4133,6 +4177,24 @@ function renderPage() {
 
       const description = document.getElementById('agent-description');
       if (description) description.textContent = agent.description || '';
+
+      const workdirPath = document.getElementById('agent-workdir-path');
+      if (workdirPath) workdirPath.textContent = agentState.workdir || HOME_DIRECTORY;
+
+      const recentList = document.getElementById('agent-recent-workdirs-list');
+      if (recentList) {
+        if (!recentWorkdirs.length) {
+          recentList.innerHTML = '<p class="recent-workdirs-empty">No recent directories yet.</p>';
+        } else {
+          recentList.innerHTML = recentWorkdirs
+            .slice(0, 5)
+            .map((entry) => {
+              const active = entry === agentState.workdir;
+              return '<button type="button" class="recent-workdir-btn ' + (active ? 'active' : '') + '" data-agent-recent-workdir="' + esc(entry) + '">' + esc(entry) + '</button>';
+            })
+            .join('');
+        }
+      }
 
       const selectedProvider = PROVIDER_ORDER[activeAgentProviderIndex()];
       const providerHost = document.getElementById('agent-provider-select');
@@ -4247,6 +4309,27 @@ function renderPage() {
         next.addEventListener('click', function (ev) {
           ev.preventDefault();
           rotateAgentProvider(1);
+        });
+      }
+      const chooseWorkdir = document.getElementById('agent-choose-workdir');
+      if (chooseWorkdir && chooseWorkdir.dataset.bound !== '1') {
+        chooseWorkdir.dataset.bound = '1';
+        chooseWorkdir.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          openDirPicker();
+        });
+      }
+      const recentItems = document.querySelectorAll('[data-agent-recent-workdir]');
+      for (const item of recentItems) {
+        if (item.dataset.bound === '1') continue;
+        item.dataset.bound = '1';
+        item.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          const val = item.getAttribute('data-agent-recent-workdir');
+          if (val) {
+            agentState.workdir = val;
+            renderAgentModal();
+          }
         });
       }
     }
@@ -4383,7 +4466,7 @@ function renderPage() {
             provider: intentState.providerKey,
             templateId: intentState.templateId,
             personaId: intentState.personaId,
-            workdir: intentState.templateId === 'continue_work' ? intentState.workdir : HOME_DIRECTORY,
+            workdir: intentState.workdir || HOME_DIRECTORY,
           };
           closeIntentModal();
           await spawnSession(targetName, payload, { autoScroll: true });
@@ -4405,7 +4488,11 @@ function renderPage() {
         agentConfirm.addEventListener('click', async function (ev) {
           ev.preventDefault();
           if (!agentState.dialId) return;
-          const payload = { dialId: agentState.dialId, provider: agentState.providerKey };
+          const payload = {
+            dialId: agentState.dialId,
+            provider: agentState.providerKey,
+            workdir: agentState.workdir || HOME_DIRECTORY
+          };
           closeAgentModal();
           await launchHotDialAgent(payload, { autoScroll: true });
         });
@@ -4435,9 +4522,15 @@ function renderPage() {
       if (pickerSelect) {
         pickerSelect.addEventListener('click', function (ev) {
           ev.preventDefault();
-          intentState.workdir = pickerState.path || HOME_DIRECTORY;
+          const selectedPath = pickerState.path || HOME_DIRECTORY;
+          if (agentState.open) {
+            agentState.workdir = selectedPath;
+            renderAgentModal();
+          } else {
+            intentState.workdir = selectedPath;
+            renderIntentModal();
+          }
           closeDirPicker();
-          renderIntentModal();
         });
       }
 
@@ -4844,7 +4937,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const provider = normalizeProvider(body.provider);
-      const launched = await launchHotDialAgent(dialId, provider);
+      const workdir = typeof body.workdir === 'string' && body.workdir.trim() ? body.workdir.trim() : null;
+      const launched = await launchHotDialAgent(dialId, provider, workdir);
       json(res, 200, { ok: true, ...launched });
     } catch (error) {
       const message = error.message || 'agent launch failed';
