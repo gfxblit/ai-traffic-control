@@ -43,6 +43,18 @@ test.use({
   ...devices['iPhone 13'],
 });
 
+async function openSidebar(page) {
+  await page.evaluate(() => {
+    document.querySelector('.app-container')?.classList.add('sidebar-open');
+  });
+}
+
+async function closeSidebar(page) {
+  await page.evaluate(() => {
+    document.querySelector('.app-container')?.classList.remove('sidebar-open');
+  });
+}
+
 async function api(pathname, method = 'GET', payload = undefined) {
   const response = await fetch(`http://127.0.0.1:${DASHBOARD_PORT}${pathname}`, {
     method,
@@ -158,7 +170,9 @@ test.afterAll(async () => {
 
 test('starting fourth scientist does not force scroll-top and targets only that card', async ({ page }) => {
   await page.goto(`http://127.0.0.1:${DASHBOARD_PORT}`);
+  await openSidebar(page);
   await page.waitForSelector('.session.tap[data-name="Delta"]');
+  await closeSidebar(page);
 
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const beforeOpen = await page.evaluate(() => window.scrollY);
@@ -201,7 +215,9 @@ test('hot dial auto-scrolls and flickers the deterministic selected scientist', 
   await waitForBackend('Charlie');
 
   await page.goto(`http://127.0.0.1:${DASHBOARD_PORT}`);
+  await openSidebar(page);
   await page.waitForSelector('.session.tap[data-name="Delta"]');
+  await closeSidebar(page);
 
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.evaluate(() => {

@@ -133,6 +133,7 @@ export class DashboardHarness {
         ENABLE_TMUX_BACKEND: '1',
         ATC_AUTO_LAUNCH_PROVIDER: '0',
         TTYD_BIN: 'ttyd',
+        REFRESH_MS: '1000',
         TELEMETRY_INGEST_MS: String(this.telemetryIngestMs),
       },
       stdio: ['ignore', 'pipe', 'pipe'],

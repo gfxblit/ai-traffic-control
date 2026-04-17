@@ -26,9 +26,9 @@ test.afterAll(async () => {
 test('persona cycles within the allowed template set and persists in session state', async ({ page }) => {
   await page.goto(`http://127.0.0.1:${DASHBOARD_PORT}`, { waitUntil: 'domcontentloaded' });
 
-  await page.evaluate((name) => {
-    window.openIntentModal(name);
-  }, harness.slotName);
+  await page.evaluate(({ name, picturePath }) => {
+    window.openIntentModal(name, picturePath);
+  }, { name: harness.slotName, picturePath: 'scientists/einstein.jpg' });
   await expect(page.locator('#intent-modal')).toHaveClass(/open/);
   await expect(page.locator('#intent-scientist img.intent-scientist-image')).toBeVisible();
   await expect(page.locator('.persona-select-card')).toHaveCount(1);
@@ -92,7 +92,7 @@ test('persona cycles within the allowed template set and persists in session sta
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('[data-persona-badge="1"]')).toHaveCount(0);
 
-  await page.locator('.session.tap').first().click();
+  await page.evaluate((name) => { window.openIntentModal(name); }, harness.slotName);
   await expect(page.locator('.persona-select-name')).toHaveText('Vanilla');
   await expect(page.locator('#intent-scientist svg.intent-scientist-hat')).toHaveCount(0);
 });

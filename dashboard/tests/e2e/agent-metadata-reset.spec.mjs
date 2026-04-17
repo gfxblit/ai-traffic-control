@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { DashboardHarness, waitFor } from './harness.mjs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const DASHBOARD_PORT = 19120;
 const BACKEND_PORT = 18130;
@@ -13,6 +15,10 @@ const harness = new DashboardHarness({
 
 test.beforeAll(async () => {
   await harness.setup('AgentMeta');
+  // Hot-dial agents (e.g. calendar_manager) default their workdir to
+  // ~/Documents/SecondBrain. The harness overrides HOME to tmpRoot, so
+  // pre-create the directory to ensure the ttyd backend can chdir into it.
+  await fs.mkdir(path.join(harness.tmpRoot, 'Documents', 'SecondBrain'), { recursive: true });
 });
 
 test.afterAll(async () => {

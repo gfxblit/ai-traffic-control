@@ -1347,6 +1347,22 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
     ? [TMUX_BIN, 'attach-session', '-t', `${tmuxSessionName}:${TMUX_SLOT_WINDOW}`]
     : [SHELL_BIN, '-il'];
 
+  // Validate workdir exists before spawning. If the cwd passed to spawn()
+  // does not exist, Node emits an 'error' event that looks like
+  // "spawn ttyd ENOENT" — misleadingly blaming the binary. Fail fast with
+  // a clear message instead.
+  try {
+    const workdirStat = await fs.stat(slotWorkdir);
+    if (!workdirStat.isDirectory()) {
+      throw new Error(`workdir is not a directory: ${slotWorkdir}`);
+    }
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw new Error(`workdir does not exist: ${slotWorkdir}`);
+    }
+    throw err;
+  }
+
   const out = fsSync.openSync(logFileForBackend(slot.backendPort), 'a');
   const child = spawn(
     TTYD_BIN,
@@ -1378,6 +1394,13 @@ async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) 
       },
     }
   );
+
+  // Attach an error handler so a spawn failure (missing binary, bad cwd,
+  // permission errors, etc.) does not bubble up as an unhandled 'error'
+  // event and kill the entire dashboard process.
+  child.on('error', (err) => {
+    console.error(`ttyd backend spawn error for ${slot.name}:`, err && err.message ? err.message : err);
+  });
 
   child.unref();
   fsSync.writeFileSync(pidFileForBackend(slot.backendPort), `${child.pid}\n`, 'utf8');
@@ -1579,11 +1602,21 @@ async function launchHotDialAgent(dialId, provider, workdir = null) {
 
   const agentPromptFile = agent.promptFile ? path.join(PERSONAS_DIR, agent.promptFile) : null;
 
+  // Hot-dial agents advertise a default workdir (e.g. ~/Documents/SecondBrain) that may
+  // not exist on every host. Fall back to HOME so the launch never 500s on a missing dir.
+  let effectiveWorkdir = workdir || agent.workdir || HOME_DIRECTORY;
+  try {
+    const stat = await fs.stat(effectiveWorkdir);
+    if (!stat.isDirectory()) effectiveWorkdir = HOME_DIRECTORY;
+  } catch {
+    effectiveWorkdir = HOME_DIRECTORY;
+  }
+
   await spawnSlotByName(selectedSlot.name, {
     provider: normalizeProvider(provider),
     templateId: TEMPLATE_NEW_BRAINSTORM,
     personaId: PERSONA_NONE,
-    workdir: workdir || agent.workdir || HOME_DIRECTORY,
+    workdir: effectiveWorkdir,
     taskTitle: agent.title,
     agentType: agent.id,
     agentPromptFile,
@@ -3970,10 +4003,18 @@ function renderPage() {
       return body;
     }
 
-    function openIntentModal(name, pictureSrc = '') {
+    function openIntentModal(name, picturePath = '') {
       intentState.open = true;
       intentState.name = name;
-      intentState.pictureSrc = pictureSrc || '';
+      const rawPath = String(picturePath || '').trim();
+      let resolvedSrc = '';
+      if (rawPath) {
+        resolvedSrc = sessionPictureSrc({ picturePath: rawPath });
+      } else {
+        const session = latestSessionsByName.get(name);
+        resolvedSrc = session ? sessionPictureSrc(session) : '';
+      }
+      intentState.pictureSrc = resolvedSrc;
       intentState.pictureAlt = name ? (name + ' portrait') : '';
       intentState.providerKey = 'codex';
       intentState.templateId = 'new_brainstorm';
@@ -4668,20 +4709,27 @@ function renderPage() {
       const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN;
       const isIdle = hasBackend && !isActive;
       const isUnborn = !hasBackend && !isSpawning;
-      
+
       const statusClass = isSpawning ? 'active' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
       const activeClass = activeSessionName === s.name ? 'active' : '';
       const pictureSrc = sessionPictureSrc(s);
       const providerKey = s.provider || 'gemini';
-      const renderKey = [statusClass, activeClass, pictureSrc, s.name, providerKey].join('::');
+      const spawningFlag = isSpawning ? '1' : '0';
+      const activeFlag = isActive ? '1' : '0';
+      const personaId = normalizePersonaId(s.personaId);
+      const showPersona = personaId !== PERSONA_NONE && s.status === 'active';
+      const personaBadgeHtml = showPersona ? personaBadge(personaId) : '';
+      const personaKey = showPersona ? personaId : '';
+      const renderKey = [statusClass, activeClass, pictureSrc, s.name, providerKey, spawningFlag, activeFlag, personaKey].join('::');
 
-      return '<div class="sidebar-item session tap ' + activeClass + '" data-name="' + esc(s.name) + '" data-render-key="' + esc(renderKey) + '">' +
-        (pictureSrc 
+      return '<div class="sidebar-item session tap ' + activeClass + '" data-name="' + esc(s.name) + '" data-spawning="' + spawningFlag + '" data-active="' + activeFlag + '" data-render-key="' + esc(renderKey) + '">' +
+        (pictureSrc
           ? '<img class="sidebar-item-img" src="' + esc(pictureSrc) + '" alt="' + esc(s.name) + '" />'
           : '<div class="sidebar-item-img" style="background:#2c3c63; display:grid; place-items:center; font-weight:700;">' + esc(s.name[0].toUpperCase()) + '</div>') +
         '<div class="sidebar-item-info">' +
           '<div class="sidebar-item-name">' + esc(s.name) + '</div>' +
           '<div class="sidebar-item-status"><span class="status-dot ' + statusClass + '"></span> ' + esc(statusClass) + '</div>' +
+          (personaBadgeHtml ? '<div class="sidebar-item-persona">' + personaBadgeHtml + '</div>' : '') +
         '</div>' +
       '</div>';
     }
