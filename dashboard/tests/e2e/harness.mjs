@@ -6,6 +6,7 @@
  */
 
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -121,6 +122,7 @@ export class DashboardHarness {
       cwd: DASHBOARD_ROOT,
       env: {
         ...process.env,
+        HOME: this.tmpRoot,
         DASHBOARD_PORT: String(this.dashboardPort),
         SESSIONS_FILE: this.sessionsFile,
         SESSIONS_STATE_FILE: this.stateFile,
@@ -130,6 +132,7 @@ export class DashboardHarness {
         ENABLE_SHELL_HOOKS: '1',
         ENABLE_TMUX_BACKEND: '1',
         ATC_AUTO_LAUNCH_PROVIDER: '0',
+        TTYD_BIN: 'ttyd',
         TELEMETRY_INGEST_MS: String(this.telemetryIngestMs),
       },
       stdio: ['ignore', 'pipe', 'pipe'],

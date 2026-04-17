@@ -11,9 +11,16 @@ const __dirname = path.dirname(__filename);
 const WRITER = path.resolve(__dirname, '../../scripts/shell-hook-writer.mjs');
 
 function runWriter({ env = {}, stdin = '' } = {}) {
+  const baseEnv = { ...process.env, ATC_NO_SUMMARIZER: '1' };
+  // Ensure some variables are cleared if not explicitly provided
+  const clearVars = ['ATC_PROVIDER', 'ATC_EVENT_TYPE', 'ATC_EVENT_CWD', 'ATC_EVENT_COMMAND', 'ATC_EVENT_DURATION_MS'];
+  for (const v of clearVars) {
+    if (!(v in env)) delete baseEnv[v];
+  }
+
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [WRITER], {
-      env: { ...process.env, ATC_NO_SUMMARIZER: '1', ...env },
+      env: { ...baseEnv, ...env },
       stdio: ['pipe', 'ignore', 'pipe'],
     });
 

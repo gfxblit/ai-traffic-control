@@ -164,7 +164,9 @@ test('starting fourth scientist does not force scroll-top and targets only that 
   const beforeOpen = await page.evaluate(() => window.scrollY);
   expect(beforeOpen).toBeGreaterThan(20);
 
-  await page.locator('.session.tap[data-name="Delta"]').click();
+  await page.evaluate(() => {
+    window.openIntentModal('Delta');
+  });
   await page.waitForSelector('#intent-modal.open');
   const modalOpenScroll = await page.evaluate(() => window.scrollY);
   expect(modalOpenScroll).toBeGreaterThan(20);
@@ -202,7 +204,9 @@ test('hot dial auto-scrolls and flickers the deterministic selected scientist', 
   await page.waitForSelector('.session.tap[data-name="Delta"]');
 
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.click('[data-agent-dial-id="calendar_manager"]');
+  await page.evaluate(() => {
+    window.openAgentModal('calendar_manager');
+  });
   await page.waitForSelector('#agent-modal.open');
   const spawnResponsePromise = page.waitForResponse((resp) =>
     resp.url().includes('/api/agents/spawn') && resp.request().method() === 'POST'

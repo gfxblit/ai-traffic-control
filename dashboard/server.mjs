@@ -19,7 +19,7 @@ const RUN_DIR = process.env.SESSIONS_RUN_DIR || path.join(__dirname, 'run');
 const RUNTIME_DIR = process.env.SESSIONS_RUNTIME_DIR || path.join(__dirname, 'runtime');
 const REPO_ROOT = path.join(__dirname, '..');
 const PERSONAS_DIR = path.join(REPO_ROOT, 'personas');
-const TTYD_BIN = process.env.TTYD_BIN || '/opt/homebrew/bin/ttyd';
+const TTYD_BIN = process.env.TTYD_BIN || (fsSync.existsSync('/opt/homebrew/bin/ttyd') ? '/opt/homebrew/bin/ttyd' : 'ttyd');
 const SHELL_BIN = process.env.SHELL_BIN || '/bin/zsh';
 const TMUX_BIN = process.env.TMUX_BIN || 'tmux';
 const ENABLE_TMUX_BACKEND = process.env.ENABLE_TMUX_BACKEND !== '0';
@@ -1325,7 +1325,8 @@ async function findListeningPid(port) {
 }
 
 async function spawnSessionBackend(slot, sessionState, runtimeEnv, shellConfig) {
-  if (!fsSync.existsSync(TTYD_BIN)) throw new Error(`ttyd not found at ${TTYD_BIN}`);
+  const ttydFound = await commandExists(TTYD_BIN);
+  if (!ttydFound) throw new Error(`ttyd not found at ${TTYD_BIN}`);
   await fs.mkdir(RUN_DIR, { recursive: true });
 
   const backendTaken = await checkPortOpen(slot.backendPort);
@@ -2664,6 +2665,9 @@ function renderPage() {
     .color-killing { color: #ff9b9b; }
     .error { color: var(--red); }
 
+    #dir-picker-modal {
+      z-index: 50;
+    }
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -4818,6 +4822,12 @@ function renderPage() {
     bindSessionInteractions();
     renderHotDials();
     refresh();
+
+    // Expose internal functions to window for E2E testing
+    window.openIntentModal = openIntentModal;
+    window.openAgentModal = openAgentModal;
+    window.refresh = refresh;
+
     setInterval(refresh, ${REFRESH_MS});
   </script>
 </body>

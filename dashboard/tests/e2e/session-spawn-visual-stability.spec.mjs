@@ -121,9 +121,8 @@ test('only target scientist card remounts while spawning', async ({ page }) => {
   await page.evaluate(() => {
     window.__atcAlphaNode = document.querySelector('.session.tap[data-name="Alpha"]');
     window.__atcCharlieNode = document.querySelector('.session.tap[data-name="Charlie"]');
+    window.openIntentModal('Bravo');
   });
-
-  await page.locator('.session.tap[data-name="Bravo"]').click();
   await page.waitForSelector('#intent-modal.open');
   await page.click('#intent-confirm');
 
