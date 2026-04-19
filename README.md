@@ -137,7 +137,7 @@ Required tools on the host machine:
 ### 2) Start session proxy + reset slots to idle
 
 ```bash
-cd ~/Code/AiTrafficControl
+cd ai-traffic-control
 ./dashboard/scripts/start-ttyd-sessions.sh
 ```
 
@@ -148,7 +148,7 @@ What this does:
 ### 3) Start the dashboard
 
 ```bash
-cd ~/Code/AiTrafficControl
+cd ai-traffic-control
 ./dashboard/scripts/start-dashboard.sh
 ```
 
@@ -197,7 +197,7 @@ Implementation reference:
 ### Run dashboard tests
 
 ```bash
-cd ~/Code/AiTrafficControl/dashboard
+cd ai-traffic-control/dashboard
 npm install
 npm test
 ```
@@ -216,14 +216,14 @@ Edit:
 Then regenerate session proxy:
 
 ```bash
-cd ~/Code/AiTrafficControl
+cd ai-traffic-control
 ./dashboard/scripts/start-ttyd-sessions.sh
 ```
 
 ### Use standalone mobile ttyd stack (outside dashboard sessions)
 
 ```bash
-cd ~/Code/AiTrafficControl/nginx-ttyd
+cd ai-traffic-control/nginx-ttyd
 ./scripts/start.sh
 ```
 

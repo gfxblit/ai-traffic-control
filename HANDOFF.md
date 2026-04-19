@@ -38,7 +38,7 @@ The `.css` and `.js` are served via `alias` directives pointing at the source fi
 
 **Step 2**: Regenerate the sessions config by re-running:
 ```bash
-cd ~/Code/AiTrafficControl/dashboard
+cd ./dashboard
 bash scripts/start-ttyd-sessions.sh
 ```
 This regenerates `dashboard/run/nginx-sessions.conf` from the template.
@@ -48,13 +48,13 @@ OR manually edit `dashboard/run/nginx-sessions.conf` if you don't want to restar
 **Step 3**: Reload both nginx instances:
 ```bash
 # Standalone nginx
-nginx -c ~/Code/AiTrafficControl/nginx-ttyd/nginx.conf \
-      -p ~/Code/AiTrafficControl/nginx-ttyd/ -s reload
+nginx -c ./nginx-ttyd/nginx.conf \
+      -p ./nginx-ttyd/ -s reload
 
 # Sessions nginx
 /opt/homebrew/opt/nginx/bin/nginx \
-      -p ~/Code/AiTrafficControl/dashboard/run/nginx/ \
-      -c ~/Code/AiTrafficControl/dashboard/run/nginx-sessions.conf \
+      -p ./dashboard/run/nginx/ \
+      -c ./dashboard/run/nginx-sessions.conf \
       -s reload
 ```
 
@@ -81,13 +81,13 @@ When changing assets, bump the `?v=N` in all of:
 
 ## How to start after reboot
 ```bash
-cd ~/Code/AiTrafficControl/dashboard
+cd ./dashboard
 bash scripts/start-ttyd-sessions.sh
 ```
 
 For the standalone endpoint:
 ```bash
-cd ~/Code/AiTrafficControl/nginx-ttyd
+cd ./nginx-ttyd
 ./scripts/start.sh
 ```
 
