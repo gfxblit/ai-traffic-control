@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DASHBOARD_TEST_IMPORT = '1';
+process.env.ATC_DISABLE_CODEX_BAR = '0';
 const { fetchCodexbarUsage } = await import('../../server.mjs');
 
 test('gemini usage retries after OAuth extraction failure and recovers', async () => {
