@@ -12,10 +12,11 @@ const FIVE_MIN = 5 * 60 * 1000;
 function classifySession(s) {
   const hasBackend = s.status === 'active' && s.backendActive;
   const isSpawning = !!s.spawning;
-  const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN;
-  const isIdle = hasBackend && !isActive;
+  const isStalled = hasBackend && s.telemetry && s.telemetry.stalled;
+  const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN && !isStalled;
+  const isIdle = hasBackend && !isActive && !isStalled;
   const isUnborn = !hasBackend && !isSpawning;
-  return isSpawning ? 'starting' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
+  return isSpawning ? 'starting' : (isStalled ? 'stalled' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn')));
 }
 
 // ---------------------------------------------------------------------------
@@ -30,9 +31,18 @@ test('session with backend and recent interaction is active', () => {
 
 test('session with backend and interaction exactly at 5 min boundary is idle', () => {
   assert.equal(classifySession({
-    status: 'active', backendActive: true, lastInteractionMs: FIVE_MIN,
+    status: 'active', backendActive: true, lastInteractionMs: 300_000,
   }), 'idle');
 });
+
+test('session with backend and stalled telemetry is stalled', () => {
+  assert.equal(classifySession({
+    status: 'active',
+    backendActive: true,
+    telemetry: { stalled: true }
+  }), 'stalled');
+});
+
 
 test('session with backend and old interaction is idle', () => {
   assert.equal(classifySession({

@@ -19,7 +19,7 @@ const RUN_DIR = process.env.SESSIONS_RUN_DIR || path.join(__dirname, 'run');
 const RUNTIME_DIR = process.env.SESSIONS_RUNTIME_DIR || path.join(__dirname, 'runtime');
 const REPO_ROOT = path.join(__dirname, '..');
 const PERSONAS_DIR = path.join(REPO_ROOT, 'personas');
-const TTYD_BIN = process.env.TTYD_BIN || (fsSync.existsSync('/opt/homebrew/bin/ttyd') ? '/opt/homebrew/bin/ttyd' : 'ttyd');
+const TTYD_BIN = process.env.TTYD_BIN || (fsSync.existsSync('/opt/homebrew/bin/ttyd') ? '/opt/homebrew/bin/ttyd' : (fsSync.existsSync('/usr/local/bin/ttyd') ? '/usr/local/bin/ttyd' : 'ttyd'));
 const SHELL_BIN = process.env.SHELL_BIN || '/bin/zsh';
 const TMUX_BIN = process.env.TMUX_BIN || 'tmux';
 const ENABLE_TMUX_BACKEND = process.env.ENABLE_TMUX_BACKEND !== '0';
@@ -34,6 +34,7 @@ const USER_HISTORY_FILE = process.env.ATC_USER_HISTORY_FILE || path.join(process
 const REFRESH_MS = 8000;
 const USAGE_TTL_MS = 10000;
 const TELEMETRY_INGEST_MS = Number(process.env.TELEMETRY_INGEST_MS || 2000);
+const STALLED_THRESHOLD_MS = Number(process.env.ATC_STALLED_THRESHOLD_MS || 120000); // 2 minutes
 const SLOT_RUN_RETENTION = Number(process.env.SLOT_RUN_RETENTION || 3);
 const RECENT_WORKDIR_LIMIT = 5;
 const TEMPLATE_NEW_BRAINSTORM = 'new_brainstorm';
@@ -41,7 +42,7 @@ const TEMPLATE_CONTINUE_WORK = 'continue_work';
 const PERSONA_NONE = 'none';
 const PROVIDERS = new Set(['codex', 'claude', 'gemini']);
 const ENABLE_PROVIDER_AUTO_LAUNCH = process.env.ATC_AUTO_LAUNCH_PROVIDER !== '0';
-const DISABLE_CODEX_BAR = process.argv.includes('--no-codexbar') || process.env.ATC_DISABLE_CODEX_BAR === '1';
+const DISABLE_CODEX_BAR = !process.argv.includes('--use-codexbar') && process.env.ATC_DISABLE_CODEX_BAR !== '0';
 const PROVIDER_BOOT_COMMANDS = {
   codex: String(process.env.ATC_PROVIDER_BOOTSTRAP_CODEX || 'codex --dangerously-bypass-approvals-and-sandbox').trim(),
   claude: String(process.env.ATC_PROVIDER_BOOTSTRAP_CLAUDE || 'claude --dangerously-skip-permissions').trim(),
@@ -659,7 +660,7 @@ async function readRecentWorkdirsFromState() {
   }
 }
 
-function checkPortOpen(port, host = '127.0.0.1', timeoutMs = 500) {
+function checkPortOpen(port, host = '127.0.0.1', timeoutMs = 1500) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let done = false;
@@ -1281,6 +1282,8 @@ async function recomputeDerivedForSlot(slot, stateRecord) {
     contextWindowPct,
     paneFingerprint,
     paneOutputAt,
+    stalled: (last.eventType === 'UserPromptSubmit' || last.eventType === 'PreToolUse' || last.eventType === 'BeforeAgent') &&
+             last.ts && (Date.now() - new Date(last.ts).getTime() > STALLED_THRESHOLD_MS),
   };
 
   await writeJsonAtomic(runtime.derivedFile, derived);
@@ -1524,7 +1527,20 @@ async function spawnSlotByName(name, options = {}) {
   const workdir = (requestedWorkdir.trim())
     ? path.resolve(requestedWorkdir.trim())
     : await resolveWorkdirForSpawn(templateId, effectiveWorkdirInput);
-  
+
+  // Validate workdir exists and is a directory BEFORE side-effects like
+  // rotating slot history or ensuring runtime directories.
+  try {
+    const stat = await fs.stat(workdir);
+    if (!stat.isDirectory()) {
+      throw new Error(`workdir is not a directory: ${workdir}`);
+    }
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw new Error(`workdir does not exist: ${workdir}`);
+    }
+    throw err;
+  }
 
   const alreadyUp = await checkPortOpen(slot.backendPort);
   if (alreadyUp && st.workdir === workdir) {
@@ -2047,6 +2063,7 @@ function renderPage() {
       flex-shrink: 0;
     }
     .status-dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-dot.stalled { background: #f87171; box-shadow: 0 0 8px #f87171; }
     .status-dot.idle { background: var(--amber); }
     .status-dot.unborn { background: #555; }
 
@@ -3416,6 +3433,8 @@ function renderPage() {
     let activeSessionEvents = [];
     let eventPollInterval = null;
     let lastEventTs = null;
+    let lastRenderGen = 0;
+    let lastSuccessfulRenderGen = 0;
 
     function toggleSidebar(force) {
       const container = document.getElementById('app-container');
@@ -3481,7 +3500,6 @@ function renderPage() {
 
     async function loadSessionChat(name) {
       console.log('loadSessionChat', name);
-      await refresh(); // Force refresh to get latest state before loading
       
       if (activeSessionName === name) {
         // If already active, just render immediately
@@ -3489,6 +3507,8 @@ function renderPage() {
         return;
       }
       activeSessionName = name;
+      await refresh(); // Force refresh to get latest state before loading
+      
       activeSessionEvents = [];
       lastEventTs = null;
       
@@ -3511,7 +3531,10 @@ function renderPage() {
       chatInput.placeholder = isActive ? 'Message ' + name + '...' : (isSpawning ? 'Scientist is starting...' : name + ' is offline');
 
       // Update Header
-      chatStatus.className = 'status-dot ' + (isActive ? 'active' : (isSpawning ? 'active' : (session?.status === 'idle' ? 'idle' : 'unborn')));
+      const isStalled = session && session.status === 'active' && session.backendActive && session.telemetry && session.telemetry.stalled;
+      let headerStatusClass = isActive ? 'active' : (isSpawning ? 'active' : (session?.status === 'idle' ? 'idle' : 'unborn'));
+      if (isStalled) headerStatusClass = 'stalled';
+      chatStatus.className = 'status-dot ' + headerStatusClass;
       chatActions.innerHTML = '';
       if (isActive && session.backendActive) {
         chatActions.innerHTML = '<a href="' + connectUrlForPort(session.publicPort) + '" target="_blank" class="btn-secondary">💻 Terminal</a> ';
@@ -4707,10 +4730,12 @@ function renderPage() {
       const hasBackend = s.status === 'active' && s.backendActive;
       const FIVE_MIN = 5 * 60 * 1000;
       const isActive = hasBackend && s.lastInteractionMs != null && s.lastInteractionMs < FIVE_MIN;
-      const isIdle = hasBackend && !isActive;
+      const isStalled = hasBackend && s.telemetry && s.telemetry.stalled;
+      const isIdle = hasBackend && !isActive && !isStalled;
       const isUnborn = !hasBackend && !isSpawning;
 
-      const statusClass = isSpawning ? 'active' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn'));
+      const statusClass = isSpawning ? 'active' : (isStalled ? 'stalled' : (isActive ? 'active' : (isIdle ? 'idle' : 'unborn')));
+      const statusLabel = isStalled ? 'stalled' : statusClass;
       const activeClass = activeSessionName === s.name ? 'active' : '';
       const pictureSrc = sessionPictureSrc(s);
       const providerKey = s.provider || 'gemini';
@@ -4728,7 +4753,7 @@ function renderPage() {
           : '<div class="sidebar-item-img" style="background:#2c3c63; display:grid; place-items:center; font-weight:700;">' + esc(s.name[0].toUpperCase()) + '</div>') +
         '<div class="sidebar-item-info">' +
           '<div class="sidebar-item-name">' + esc(s.name) + '</div>' +
-          '<div class="sidebar-item-status"><span class="status-dot ' + statusClass + '"></span> ' + esc(statusClass) + '</div>' +
+          '<div class="sidebar-item-status"><span class="status-dot ' + statusClass + '"></span> ' + esc(statusLabel) + '</div>' +
           (personaBadgeHtml ? '<div class="sidebar-item-persona">' + personaBadgeHtml + '</div>' : '') +
         '</div>' +
       '</div>';
@@ -4796,10 +4821,15 @@ function renderPage() {
       }
     }
 
-    function renderSessions(sessionsPayload) {
+    function renderSessions(sessionsPayload, thisGen) {
+      if (thisGen != null && thisGen < lastSuccessfulRenderGen) {
+        console.log('skipping stale render', thisGen, '<', lastSuccessfulRenderGen);
+        return;
+      }
+      if (thisGen != null) lastSuccessfulRenderGen = thisGen;
+
       const sessions = sessionsPayload.sessions || [];
       latestSessionsByName = new Map(sessions.map(function (s) { return [s.name, s]; }));
-      console.log('latestSessionsByName keys:', Array.from(latestSessionsByName.keys()));
       const latestRecent = Array.isArray(sessionsPayload.recentWorkdirs) ? sessionsPayload.recentWorkdirs : [];
       recentWorkdirs.splice(0, recentWorkdirs.length, ...latestRecent);
       const sessionsEl = document.getElementById('sessions');
@@ -4811,10 +4841,18 @@ function renderPage() {
         return;
       }
 
+      // Pre-cleanup junk elements (like "No sessions" message) to ensure accurate indexing
+      const validNames = new Set(sessions.map(function (s) { return s.name; }));
+      for (const el of Array.from(sessionsEl.children)) {
+        if (!el.matches || !el.matches('.sidebar-item[data-name]')) {
+          el.remove();
+        } else if (!validNames.has(el.getAttribute('data-name'))) {
+          el.remove();
+        }
+      }
+
       const existingCards = new Map();
-      const existingElements = Array.from(sessionsEl.children).filter(function (el) {
-        return el.matches && el.matches('.sidebar-item[data-name]');
-      });
+      const existingElements = Array.from(sessionsEl.children);
       for (const el of existingElements) {
         existingCards.set(el.getAttribute('data-name'), el);
       }
@@ -4841,21 +4879,13 @@ function renderPage() {
       });
 
       if (activeSessionName) renderChat();
-
-      const validNames = new Set(sessions.map(function (s) { return s.name; }));
-      for (const el of Array.from(sessionsEl.children)) {
-        if (!el.matches || !el.matches('.sidebar-item[data-name]')) {
-          el.remove();
-          continue;
-        }
-        if (!validNames.has(el.getAttribute('data-name'))) el.remove();
-      }
     }
 
     async function refresh() {
+      const thisGen = ++lastRenderGen;
       const sessionsTask = fetch('/api/sessions', { cache: 'no-store' })
         .then(function (resp) { return resp.json(); })
-        .then(function (payload) { renderSessions(payload || {}); })
+        .then(function (payload) { renderSessions(payload || {}, thisGen); })
         .catch(function (err) { console.error('refresh sessions failed', err); });
 
       const usageTask = fetch('/api/usage', { cache: 'no-store' })
